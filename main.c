@@ -261,7 +261,20 @@ void Setup_SPC();
 void Setup_ADC(){
 	
 	printf("Setup_ADC enter\n");
-	//Do we need to enable the ADC clock?
+	
+	//Enable the RCC ADC 1 clock
+	RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
+	
+	ADC_InitTypeDef ADC_InitStruct;
+	ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
+	
+	//I don't think that we care about the data alignment as long as it is consistent
+	//ADC_InitStruct.ADC_DataAlign
+	
+	//I don't think we care 
+	//ADC_InitStruct.ADC_Resolution
+	
+	
 
 
 	//ADC_Init(ADC1, ADC_InitStruct)
