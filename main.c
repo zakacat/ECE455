@@ -185,6 +185,17 @@ static void Green_LED_Controller_Task( void *pvParameters );
 static void Red_LED_Controller_Task( void *pvParameters );
 static void Amber_LED_Controller_Task( void *pvParameters );
 
+//Our tasks to be defined
+
+//This task will be reading the potentiometer
+//static void Traffic_Flow_Adjustment_Task( void *pvParameters );
+//This is for the traffic
+//static void Traffic_Generator_Task( void *pvParameters );
+//This is for the traffic light
+//static void Traffic_Light_State_Task( void *pvParameters );
+//I think that this task may be redundant
+//static void System_Display_Task( void *pvParameters );
+
 xQueueHandle xQueue_handle = 0;
 
 
@@ -220,6 +231,8 @@ int main(void)
 
 
 	Setup_GPIO();
+
+	Setup_ADC();
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
@@ -231,53 +244,86 @@ void Setup_GPIO(){
 
 	printf("Setup_GPIO enter\n");
 
-	//Enable the RCC peripheral clock port B GPIOs
-	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOBEN, ENABLE);
+	//Enable the RCC peripheral clock port C GPIOs
+	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
 
 	//Create intialization struct
-	GPIO_InitTypeDef GPIO_InitStruct;
-	//Configure Pin 0
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0;
-	//Set Mode to output
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
-	//Set to Push-Pull
-	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-	//Set speed to slowest speed to avoid noise
-	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
-	//Set to no pull
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
-	//Set bits to pin 0
-	GPIO_SetBits(GPIOB, GPIO_Pin_0);
+//	GPIO_InitTypeDef GPIO_InitStruct;
+//	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
+//	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 ;
+//	//Set Mode to output
+//	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
+//	//Set to Push-Pull
+//	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+//	//Set speed to slowest speed to avoid noise
+//	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+//	//Set to no pull
+//	//GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+//	//Set bits to pin 3 which is the green light
+//	//GPIO_SetBits(GPIOC, GPIO_Pin_3);
+//
+//	//Initialize the port
+//	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	//Initialize the port
-	GPIO_Init(GPIOB, &GPIO_InitStruct);
+	//Create intialization struct
+	GPIO_InitTypeDef GPIO_InitStruct2;
+
+	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
+	GPIO_InitStruct2.GPIO_Pin = GPIO_Pin_3;
+	//Set Mode to output
+	GPIO_InitStruct2.GPIO_Mode = GPIO_Mode_AN;
+	//Set to Push-Pull
+	//GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	//Set speed to slowest speed to avoid noise
+	//GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
+	//Set to no pull
+	GPIO_InitStruct2.GPIO_PuPd = GPIO_PuPd_NOPULL;
+//
+//	//Initialize the port
+	GPIO_Init(GPIOC, &GPIO_InitStruct2);
 
 	printf("Setup_GPIO exit\n");
 
 }
 //Serial to Parallel Converter
 void Setup_SPC();
+
 //Set up the ADC peripheral for potentiometer
 void Setup_ADC(){
-	
+
 	printf("Setup_ADC enter\n");
-	
+
 	//Enable the RCC ADC 1 clock
 	RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
-	
+
 	ADC_InitTypeDef ADC_InitStruct;
 	ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
-	
+
 	//I don't think that we care about the data alignment as long as it is consistent
-	//ADC_InitStruct.ADC_DataAlign
-	
-	//I don't think we care 
-	//ADC_InitStruct.ADC_Resolution
-	
-	
+	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
+
+	//I don't think we care
+	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
+
+	ADC_InitStruct.ADC_ScanConvMode = ENABLE;
 
 
-	//ADC_Init(ADC1, ADC_InitStruct)
+
+
+
+	ADC_Init(ADC1, &ADC_InitStruct);
+
+
+
+	//Set the ADC command
+	ADC_Cmd(ADC1, ENABLE);
+
+	//Config the channel
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_3Cycles);
+
+
+
+
 	printf("Setup_ADC exit\n");
 }
 
@@ -291,6 +337,7 @@ static void Manager_Task( void *pvParameters )
 
 	while(1)
 	{
+		ADC_SoftwareStartConv(ADC1);
 
 		if(tx_data == amber){
 			STM_EVAL_LEDOn(amber_led);
@@ -307,6 +354,15 @@ static void Manager_Task( void *pvParameters )
 		if(tx_data == blue){
 			STM_EVAL_LEDOn(blue_led);
 			GPIO_ResetBits(GPIOB, GPIO_Pin_0);
+		}
+
+		if(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC)){
+			uint16_t pot = 0 ;
+
+			pot = ADC_GetConversionValue(ADC1);
+
+			printf("This is the pot value:  %u \n", pot);
+
 		}
 
 
