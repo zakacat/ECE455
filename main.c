@@ -173,11 +173,13 @@ static void prvSetupHardware( void );
  * this file.
  */
 //Set up the GPIO pins for the LEDs
-void Setup_GPIO();
+static void Setup_GPIO_Traffic();
+
+static void Setup_GPIO_Pot();
 //Serial to Parallel Converter
-void Setup_SPC();
+static void Setup_SPC();
 //Set up the ADC peripheral for potentiometer
-void Setup_ADC();
+static void Setup_ADC();
 
 static void Manager_Task( void *pvParameters );
 static void Blue_LED_Controller_Task( void *pvParameters );
@@ -205,7 +207,7 @@ int main(void)
 {
 
 	/* Initialize LEDs */
-	STM_EVAL_LEDInit(amber_led);
+       	STM_EVAL_LEDInit(amber_led);
 	STM_EVAL_LEDInit(green_led);
 	STM_EVAL_LEDInit(red_led);
 	STM_EVAL_LEDInit(blue_led);
@@ -230,7 +232,9 @@ int main(void)
 	xTaskCreate( Amber_LED_Controller_Task, "Amber_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 
-	Setup_GPIO();
+	Setup_GPIO_Traffic();
+
+	Setup_GPIO_Pot();
 
 	Setup_ADC();
 	/* Start the tasks and timer running. */
@@ -240,56 +244,65 @@ int main(void)
 }
 
 //Set up the GPIO pins for the LEDs
-void Setup_GPIO(){
+static void Setup_GPIO_Traffic(){
 
-	printf("Setup_GPIO enter\n");
+	printf("Setup_GPIO_Traffic enter\n");
 
 	//Enable the RCC peripheral clock port C GPIOs
+
 	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
 
 	//Create intialization struct
-//	GPIO_InitTypeDef GPIO_InitStruct;
-//	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
-//	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 ;
-//	//Set Mode to output
-//	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
-//	//Set to Push-Pull
-//	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-//	//Set speed to slowest speed to avoid noise
-//	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
-//	//Set to no pull
-//	//GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
-//	//Set bits to pin 3 which is the green light
-//	//GPIO_SetBits(GPIOC, GPIO_Pin_3);
-//
-//	//Initialize the port
-//	GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-	//Create intialization struct
-	GPIO_InitTypeDef GPIO_InitStruct2;
-
+	GPIO_InitTypeDef GPIO_InitStruct;
 	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
-	GPIO_InitStruct2.GPIO_Pin = GPIO_Pin_3;
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 ;
+
 	//Set Mode to output
-	GPIO_InitStruct2.GPIO_Mode = GPIO_Mode_AN;
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
+	//Set to Push-Pull
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	//Set speed to slowest speed to avoid noise
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
+	//Set to no pull
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+	//GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	//
+
+	//Initialize the port
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	printf("Setup_GPIO_Traffic exit\n");
+
+}
+
+static void Setup_GPIO_Pot(){
+
+	printf("Setup_GPIO_Pot enter\n");
+	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
+	//Create intialization struct
+	GPIO_InitTypeDef GPIO_InitStruct;
+
+
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
+	//Set Mode to output
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
 	//Set to Push-Pull
 	//GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
 	//Set speed to slowest speed to avoid noise
 	//GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
 	//Set to no pull
-	GPIO_InitStruct2.GPIO_PuPd = GPIO_PuPd_NOPULL;
-//
-//	//Initialize the port
-	GPIO_Init(GPIOC, &GPIO_InitStruct2);
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
 
-	printf("Setup_GPIO exit\n");
+	//Initialize the port
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+	printf("Setup_GPIO_Pot exit\n");
 
 }
 //Serial to Parallel Converter
-void Setup_SPC();
+static void Setup_SPC();
 
 //Set up the ADC peripheral for potentiometer
-void Setup_ADC(){
+static void Setup_ADC(){
 
 	printf("Setup_ADC enter\n");
 
@@ -297,29 +310,28 @@ void Setup_ADC(){
 	RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
 
 	ADC_InitTypeDef ADC_InitStruct;
-	ADC_InitStruct.ADC_ContinuousConvMode = ENABLE;
+	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
 
 	//I don't think that we care about the data alignment as long as it is consistent
 	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
 
+	ADC_InitStruct.ADC_ExternalTrigConv = DISABLE;
+
+	ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
+
+	ADC_InitStruct.ADC_NbrOfConversion = 1;
 	//I don't think we care
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
 
-	ADC_InitStruct.ADC_ScanConvMode = ENABLE;
-
-
-
-
+	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
 
 	ADC_Init(ADC1, &ADC_InitStruct);
-
-
 
 	//Set the ADC command
 	ADC_Cmd(ADC1, ENABLE);
 
 	//Config the channel
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_3Cycles);
+	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
 
 
 
@@ -337,23 +349,28 @@ static void Manager_Task( void *pvParameters )
 
 	while(1)
 	{
-		ADC_SoftwareStartConv(ADC1);
 
+		ADC_SoftwareStartConv(ADC1);
+		//RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
 		if(tx_data == amber){
 			STM_EVAL_LEDOn(amber_led);
-			GPIO_SetBits(GPIOB, GPIO_Pin_0);
+			GPIO_SetBits(GPIOC, GPIO_Pin_0);
 		}
 		if(tx_data == green){
 			STM_EVAL_LEDOn(green_led);
-			GPIO_ResetBits(GPIOB, GPIO_Pin_0);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
+			GPIO_SetBits(GPIOC, GPIO_Pin_1);
 		}
 		if(tx_data == red){
 			STM_EVAL_LEDOn(red_led);
-			GPIO_SetBits(GPIOB, GPIO_Pin_0);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
+			GPIO_SetBits(GPIOC, GPIO_Pin_2);
 		}
 		if(tx_data == blue){
 			STM_EVAL_LEDOn(blue_led);
-			GPIO_ResetBits(GPIOB, GPIO_Pin_0);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
 		}
 
 		if(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC)){
