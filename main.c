@@ -207,7 +207,7 @@ int main(void)
 {
 
 	/* Initialize LEDs */
-       	STM_EVAL_LEDInit(amber_led);
+    STM_EVAL_LEDInit(amber_led);
 	STM_EVAL_LEDInit(green_led);
 	STM_EVAL_LEDInit(red_led);
 	STM_EVAL_LEDInit(blue_led);
@@ -237,6 +237,8 @@ int main(void)
 	Setup_GPIO_Pot();
 
 	Setup_ADC();
+
+	Setup_SPC();
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
@@ -249,14 +251,13 @@ static void Setup_GPIO_Traffic(){
 	printf("Setup_GPIO_Traffic enter\n");
 
 	//Enable the RCC peripheral clock port C GPIOs
-
 	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
 
 	//Create intialization struct
 	GPIO_InitTypeDef GPIO_InitStruct;
+
 	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 ;
-
 	//Set Mode to output
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
 	//Set to Push-Pull
@@ -265,9 +266,6 @@ static void Setup_GPIO_Traffic(){
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
 	//Set to no pull
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
-	//GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
-	//
-
 	//Initialize the port
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
 
@@ -279,17 +277,13 @@ static void Setup_GPIO_Pot(){
 
 	printf("Setup_GPIO_Pot enter\n");
 	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
+
 	//Create intialization struct
 	GPIO_InitTypeDef GPIO_InitStruct;
-
-
+	//Isolate Pin C3
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
-	//Set Mode to output
+	//Set Mode to analog in
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
-	//Set to Push-Pull
-	//GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-	//Set speed to slowest speed to avoid noise
-	//GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
 	//Set to no pull
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
 
@@ -299,7 +293,35 @@ static void Setup_GPIO_Pot(){
 
 }
 //Serial to Parallel Converter
-static void Setup_SPC();
+static void Setup_SPC(){
+
+	printf("Setup_SPC enter\n");
+	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
+
+	//Create intialization struct
+	GPIO_InitTypeDef GPIO_InitStruct;
+
+	//Isolate Pin C8 = shift reset, C7 = shift clock, C6 = shift data, C4 = 2nd shift clock
+	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_7| GPIO_Pin_6 | GPIO_Pin_4;
+	//Set Mode to output
+	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
+	//Set to Push-Pull
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+	//Set speed to slowest speed to avoid noise
+	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
+	//Set to no pull
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
+
+
+
+	//Initialize the port
+	GPIO_Init(GPIOC, &GPIO_InitStruct);
+	GPIO_SetBits(GPIOC, GPIO_Pin_8);
+	//GPIO_SetBits(GPIOC, GPIO_Pin_6);
+	GPIO_ResetBits(GPIOC, GPIO_Pin_7);
+	printf("Setup_SPC exit\n");
+
+}
 
 //Set up the ADC peripheral for potentiometer
 static void Setup_ADC(){
@@ -351,30 +373,11 @@ static void Manager_Task( void *pvParameters )
 	{
 
 		ADC_SoftwareStartConv(ADC1);
-		//RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
-		if(tx_data == amber){
-			STM_EVAL_LEDOn(amber_led);
-			GPIO_SetBits(GPIOC, GPIO_Pin_0);
-		}
-		if(tx_data == green){
-			STM_EVAL_LEDOn(green_led);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
-			GPIO_SetBits(GPIOC, GPIO_Pin_1);
-		}
-		if(tx_data == red){
-			STM_EVAL_LEDOn(red_led);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
-			GPIO_SetBits(GPIOC, GPIO_Pin_2);
-		}
-		if(tx_data == blue){
-			STM_EVAL_LEDOn(blue_led);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
-		}
+
+		uint16_t pot = 0 ;
 
 		if(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC)){
-			uint16_t pot = 0 ;
+
 
 			pot = ADC_GetConversionValue(ADC1);
 
@@ -382,18 +385,19 @@ static void Manager_Task( void *pvParameters )
 
 		}
 
+		if(!xQueueReceive(xQueue_handle, &pot, 0)){
+			if( xQueueSend(xQueue_handle,&pot,1000))
+			{
+				printf("Manager: %u ON!\n", pot);
+				vTaskDelay(200);
+			}
+			else
+			{
+				printf("Manager Failed!\n");
+			}
+		}
 
-		if( xQueueSend(xQueue_handle,&tx_data,1000))
-		{
-			printf("Manager: %u ON!\n", tx_data);
-			if(++tx_data == 4)
-				tx_data = 0;
-			vTaskDelay(1000);
-		}
-		else
-		{
-			printf("Manager Failed!\n");
-		}
+
 	}
 }
 
@@ -401,26 +405,83 @@ static void Manager_Task( void *pvParameters )
 
 static void Blue_LED_Controller_Task( void *pvParameters )
 {
-	uint16_t rx_data;
+	uint16_t pot2;
+
+	uint16_t yellow = 3000; // All lights start with the same duration
+	uint16_t red2 = 3000;
+	uint16_t green2 = 3000;
+
+	char curr = 'g'; // Light starts on green
+
+	GPIO_ResetBits(GPIOC, GPIO_Pin_8);
+	vTaskDelay(50);
+	GPIO_SetBits(GPIOC, GPIO_Pin_8);
+
+
 	while(1)
 	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
+
+		//check the pot
+		if(xQueueReceive(xQueue_handle, &pot2, 500))
 		{
-			if(rx_data == blue)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(blue_led);
-				printf("Blue Off.\n");
+
+			printf("Blue task.\n");
+
+			if(pot2 < 1100){ // if pot is less than 1100, then red is longer, and green is shorter
+				red2 = 5000;
+				green2 = 1000;
 			}
-			else
+			else if (pot2 > 2200){ // If pot is more than 2200, then red is shorter, and green is longer
+
+				red2 = 1000;
+				green2 = 5000;
+
+			}
+			else //else, then red and green and are the same as yellow
 			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("BlueTask GRP (%u).\n", rx_data); // Got wwrong Package
-						vTaskDelay(500);
-					}
+				red2 = 3000;
+				green2 = 3000;
 			}
 		}
+
+		if(curr == 'g'){//if light is green
+			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
+
+			GPIO_SetBits(GPIOC, GPIO_Pin_2);
+
+			curr = 'r';
+
+			//printf("green duration %u .\n" , green);
+			//printf("pot %u  .\n" , pot2);
+
+			vTaskDelay(green2);
+
+		}
+		else if (curr == 'r'){// or if red
+			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
+
+			GPIO_SetBits(GPIOC, GPIO_Pin_0);
+
+			curr = 'y';
+
+			vTaskDelay(red2);
+
+		}
+		else { // must be yellow
+			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
+
+			GPIO_SetBits(GPIOC, GPIO_Pin_1);
+
+			curr = 'g';
+
+			vTaskDelay(yellow);
+
+		}
+
+
 	}
 }
 
@@ -429,26 +490,16 @@ static void Blue_LED_Controller_Task( void *pvParameters )
 
 static void Green_LED_Controller_Task( void *pvParameters )
 {
-	uint16_t rx_data;
+//	uint16_t rx_data;
 	while(1)
 	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == green)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(green_led);
-				printf("Green Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("GreenTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
+
+			GPIO_ResetBits(GPIOC, GPIO_Pin_4);
+			vTaskDelay(250);
+			GPIO_SetBits(GPIOC, GPIO_Pin_4);
+			vTaskDelay(250);
+
+
 	}
 }
 
@@ -456,26 +507,33 @@ static void Green_LED_Controller_Task( void *pvParameters )
 
 static void Red_LED_Controller_Task( void *pvParameters )
 {
-	uint16_t rx_data;
+
 	while(1)
 	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == red)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(red_led);
-				printf("Red off.\n");
+		//Here we will want to read the traffic light value then adjust the led array accordingly.
+
+		//Data will arrive reversed
+		int arr[8] = {1,0,1,0,1,0,1,0};
+
+
+		for(int i = 0; i < 8; i++){
+
+			if(arr[i] == 1){
+				GPIO_SetBits(GPIOC, GPIO_Pin_6);
 			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("RedTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
+			else{
+				GPIO_ResetBits(GPIOC, GPIO_Pin_6);
 			}
+
+				//vTaskDelay(5);
+				GPIO_SetBits(GPIOC, GPIO_Pin_7);
+				//vTaskDelay(5);
+				GPIO_ResetBits(GPIOC, GPIO_Pin_7);
+
+			printf("arr value:  %d \n", arr[i]);
+
 		}
+		vTaskDelay(500);
 	}
 }
 
@@ -484,26 +542,26 @@ static void Red_LED_Controller_Task( void *pvParameters )
 
 static void Amber_LED_Controller_Task( void *pvParameters )
 {
-	uint16_t rx_data;
+//	uint16_t rx_data;
 	while(1)
 	{
-		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-		{
-			if(rx_data == amber)
-			{
-				vTaskDelay(250);
-				STM_EVAL_LEDOff(amber_led);
-				printf("Amber Off.\n");
-			}
-			else
-			{
-				if( xQueueSend(xQueue_handle,&rx_data,1000))
-					{
-						printf("AmberTask GRP (%u).\n", rx_data); // Got wrong Package
-						vTaskDelay(500);
-					}
-			}
-		}
+//		if(xQueueReceive(xQueue_handle, &rx_data, 500))
+//		{
+//			if(rx_data == amber)
+//			{
+	vTaskDelay(250);
+//				STM_EVAL_LEDOff(amber_led);
+//				printf("Amber Off.\n");
+//			}
+//			else
+//			{
+//				if( xQueueSend(xQueue_handle,&rx_data,1000))
+//					{
+//						printf("AmberTask GRP (%u).\n", rx_data); // Got wrong Package
+//						vTaskDelay(500);
+//					}
+//			}
+//		}
 	}
 }
 
