@@ -138,7 +138,7 @@ functionality.
 #include <stdint.h>
 #include <stdio.h>
 #include "stm32f4_discovery.h"
-#include <stdlib.h>
+#include <stdlib.h> //Added for random function
 /* Kernel includes. */
 #include "stm32f4xx.h"
 #include "../FreeRTOS_Source/include/FreeRTOS.h"
@@ -150,18 +150,7 @@ functionality.
 
 
 /*-----------------------------------------------------------*/
-#define mainQUEUE_LENGTH 100
-
-#define amber  	0
-#define green  	1
-#define red  	2
-#define blue  	3
-
-#define amber_led	LED3
-#define green_led	LED4
-#define red_led		LED5
-#define blue_led	LED6
-
+#define mainQUEUE_LENGTH 3
 
 /*
  * TODO: Implement this function for any hardware specific clock configuration
@@ -182,22 +171,11 @@ static void Setup_SPC();
 //Set up the ADC peripheral for potentiometer
 static void Setup_ADC();
 
-static void Manager_Task( void *pvParameters );
-static void Blue_LED_Controller_Task( void *pvParameters );
-static void Green_LED_Controller_Task( void *pvParameters );
-static void Red_LED_Controller_Task( void *pvParameters );
-static void Amber_LED_Controller_Task( void *pvParameters );
+static void Pot_Reader_Task( void *pvParameters );
+static void Traffic_Light_Controller_Task( void *pvParameters );
+static void Hardware_Clock_Task( void *pvParameters );
+static void Car_Generation_Task( void *pvParameters );
 
-//Our tasks to be defined
-
-//This task will be reading the potentiometer
-//static void Traffic_Flow_Adjustment_Task( void *pvParameters );
-//This is for the traffic
-//static void Traffic_Generator_Task( void *pvParameters );
-//This is for the traffic light
-//static void Traffic_Light_State_Task( void *pvParameters );
-//I think that this task may be redundant
-//static void System_Display_Task( void *pvParameters );
 
 xQueueHandle xQueue_handle = 0;
 xQueueHandle xQueue_handle2 = 0;
@@ -208,11 +186,6 @@ xQueueHandle xQueue_handle2 = 0;
 int main(void)
 {
 
-	/* Initialize LEDs */
-    STM_EVAL_LEDInit(amber_led);
-	STM_EVAL_LEDInit(green_led);
-	STM_EVAL_LEDInit(red_led);
-	STM_EVAL_LEDInit(blue_led);
 
 	/* Configure the system ready to run the demo.  The clock configuration
 	can be done here if it was not done before main() was called. */
@@ -228,16 +201,14 @@ int main(void)
 								sizeof( char ) );	/* The size of each item the queue holds. */
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "MainQueue" );
+	vQueueAddToRegistry( xQueue_handle, "Potentiometer" );
 
 	vQueueAddToRegistry( xQueue_handle2, "TrafficLight" );
 
-	xTaskCreate( Manager_Task, "Manager", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-	xTaskCreate( Blue_LED_Controller_Task, "Blue_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Red_LED_Controller_Task, "Red_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Green_LED_Controller_Task, "Green_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Amber_LED_Controller_Task, "Amber_LED", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
+	xTaskCreate( Pot_Reader_Task, "Pot_Reader", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+	xTaskCreate( Traffic_Light_Controller_Task, "Traffic_Light_Controller", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Hardware_Clock_Task, "Hardware_Clock", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Car_Generation_Task, "Car_Generation", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 	Setup_GPIO_Traffic();
 
@@ -246,6 +217,7 @@ int main(void)
 	Setup_ADC();
 
 	Setup_SPC();
+
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
@@ -323,8 +295,10 @@ static void Setup_SPC(){
 
 	//Initialize the port
 	GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+	//1 means not reset
 	GPIO_SetBits(GPIOC, GPIO_Pin_8);
-	//GPIO_SetBits(GPIOC, GPIO_Pin_6);
+	//Turn off the first SPC clock
 	GPIO_ResetBits(GPIOC, GPIO_Pin_7);
 	printf("Setup_SPC exit\n");
 
@@ -349,7 +323,7 @@ static void Setup_ADC(){
 	ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
 
 	ADC_InitStruct.ADC_NbrOfConversion = 1;
-	//I don't think we care
+
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
 
 	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
@@ -362,19 +336,14 @@ static void Setup_ADC(){
 	//Config the channel
 	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
 
-
-
-
 	printf("Setup_ADC exit\n");
 }
 
 
 /*-----------------------------------------------------------*/
 
-static void Manager_Task( void *pvParameters )
+static void Pot_Reader_Task( void *pvParameters )
 {
-	//uint16_t tx_data = amber;
-
 
 	while(1)
 	{
@@ -392,11 +361,11 @@ static void Manager_Task( void *pvParameters )
 
 		}
 
-		if(!xQueueReceive(xQueue_handle, &pot, 0)){
+		if(!xQueueReceive(xQueue_handle, &pot, 0)){ //Only if queue is empty, add a value to it
 			if( xQueueSend(xQueue_handle,&pot,1000))
 			{
 				printf("Manager: %u ON!\n", pot);
-				vTaskDelay(200);
+				vTaskDelay(200);//Add a delay to allow other tasks to go
 			}
 			else
 			{
@@ -410,17 +379,17 @@ static void Manager_Task( void *pvParameters )
 
 /*-----------------------------------------------------------*/
 
-static void Blue_LED_Controller_Task( void *pvParameters )
+static void Traffic_Light_Controller_Task( void *pvParameters )
 {
-	uint16_t pot2;
+	uint16_t pot;
 
 	uint16_t yellow = 3000; // All lights start with the same duration
-	uint16_t red2 = 3000;
-	uint16_t green2 = 3000;
+	uint16_t red = 3000;
+	uint16_t green = 3000;
 
 	char curr = 'g'; // Light starts on green
 
-	GPIO_ResetBits(GPIOC, GPIO_Pin_8);
+	GPIO_ResetBits(GPIOC, GPIO_Pin_8); //Reset first 8 LEDs at the beginning of the instance
 	vTaskDelay(50);
 	GPIO_SetBits(GPIOC, GPIO_Pin_8);
 
@@ -429,25 +398,25 @@ static void Blue_LED_Controller_Task( void *pvParameters )
 	{
 
 		//check the pot
-		if(xQueueReceive(xQueue_handle, &pot2, 500))
+		if(xQueueReceive(xQueue_handle, &pot, 500))
 		{
 
 			printf("Blue task.\n");
 
-			if(pot2 < 1100){ // if pot is less than 1100, then red is longer, and green is shorter
-				red2 = 2000;
-				green2 = 4000;
+			if(pot < 1100){ // if pot is less than 1100, then red is shorter, and green is longer
+				red = 2000;
+				green = 4000;
 			}
-			else if (pot2 > 2200){ // If pot is more than 2200, then red is shorter, and green is longer
+			else if (pot > 2200){ // If pot is more than 2200, then red is longer, and green is shorter
 
-				red2 = 4000;
-				green2 = 2000;
+				red = 4000;
+				green = 2000;
 
 			}
 			else //else, then red and green and are the same as yellow
 			{
-				red2 = 3000;
-				green2 = 3000;
+				red = 3000;
+				green = 3000;
 			}
 		}
 
@@ -457,45 +426,42 @@ static void Blue_LED_Controller_Task( void *pvParameters )
 
 			GPIO_SetBits(GPIOC, GPIO_Pin_2);
 
-			curr = 'r';
-
-			//printf("green duration %u .\n" , green);
-			//printf("pot %u  .\n" , pot2);
-
-			vTaskDelay(green2);
-
-		}
-		else if (curr == 'r'){// or if red
-			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
-			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
-
-			GPIO_SetBits(GPIOC, GPIO_Pin_0);
-
 			curr = 'y';
 
-			vTaskDelay(red2);
+			vTaskDelay(green);
 
 		}
-		else { // must be yellow
+		else if (curr == 'y'){// or if yellow
 			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
 			GPIO_ResetBits(GPIOC, GPIO_Pin_0);
 
 			GPIO_SetBits(GPIOC, GPIO_Pin_1);
 
-			curr = 'g';
+			curr = 'r';
 
 			vTaskDelay(yellow);
 
 		}
+		else { // must be red
+			GPIO_ResetBits(GPIOC, GPIO_Pin_2);
+			GPIO_ResetBits(GPIOC, GPIO_Pin_1);
 
-		if( xQueueSend(xQueue_handle2,&curr,1000))
-		{
-			printf("traffic sent: %c ON!\n", curr);
-			vTaskDelay(200);
+			GPIO_SetBits(GPIOC, GPIO_Pin_0);
+
+			curr = 'g';
+
+			vTaskDelay(red);
+
 		}
-		else
-		{
-			printf("traffic Failed!\n");
+		if(!xQueueReceive(xQueue_handle2, &curr, 0)){
+			if( xQueueSend(xQueue_handle2,&curr,1000))
+			{
+				printf("traffic sent: %c ON!\n", curr);
+			}
+			else
+			{
+				printf("traffic Failed!\n");
+			}
 		}
 
 
@@ -505,9 +471,9 @@ static void Blue_LED_Controller_Task( void *pvParameters )
 
 /*-----------------------------------------------------------*/
 
-static void Green_LED_Controller_Task( void *pvParameters )
+static void Hardware_Clock_Task( void *pvParameters )
 {
-//	uint16_t rx_data;
+
 	while(1)
 	{
 
@@ -522,24 +488,24 @@ static void Green_LED_Controller_Task( void *pvParameters )
 
 /*-----------------------------------------------------------*/
 
-static void Red_LED_Controller_Task( void *pvParameters )
+static void Car_Generation_Task( void *pvParameters )
 {
 
-	char curr2;
+	char curr; //current light
 
 	int num = 10; //Random max
 
-	int val;
+	int val; //rando value
 
-	int arr[8] = {0,0,0,0,0,0,0,0};
+	int arr[8] = {0,0,0,0,0,0,0,0}; //Simulate the first 8 leds
 
 	int carArrive = 0; //Whether a car will arrive next second
 
-	uint16_t pot2;
+	uint16_t pot; // pot value
 
-	int wait; //how many cars to wait
+	int wait = 0; //how many cars to wait
 
-	int count = 0;
+	int count = 0; //count each iteration
 
 
 	while(1)
@@ -547,20 +513,20 @@ static void Red_LED_Controller_Task( void *pvParameters )
 		//Here we will want to read the traffic light value then adjust the led array accordingly.
 
 		//check the pot
-		if(xQueueReceive(xQueue_handle2, &curr2, 500))
+		if(xQueueReceive(xQueue_handle2, &curr, 500))
 		{
-			printf("traffic received: %c ON!\n", curr2);
+			printf("traffic received: %c ON!\n", curr);
 
 		}
 
 		//check the pot
-		if(xQueueReceive(xQueue_handle, &pot2, 0)){
+		if(xQueueReceive(xQueue_handle, &pot, 0)){
 
-			if(pot2 < 1100){ // if pot is less than 1100, then red is longer, and green is shorter
+			if(pot < 1100){ // if pot is less than 1100, then red is longer, and green is shorter
 
 				wait = 0;
 			}
-			else if (pot2 > 2200){ // If pot is more than 2200, then red is shorter, and green is longer
+			else if (pot > 2200){ // If pot is more than 2200, then red is shorter, and green is longer
 
 				wait = 5;
 
@@ -588,7 +554,7 @@ static void Red_LED_Controller_Task( void *pvParameters )
 
 		//SHIFT LOGIC
 
-		if(curr2 == 'g'){
+		if(curr == 'g'){
 		//If the light is green.
 			for(int i = 7; i >= 0; i--){
 
@@ -640,7 +606,7 @@ static void Red_LED_Controller_Task( void *pvParameters )
 
 					if(arr[1] + arr[2] + arr[3] + arr[4] + arr[5] + arr[6] + arr[7]  == 7){
 						if(arr[0] == 1){
-							//donothing
+							//do nothing
 						}
 						else{
 							arr[0] = carArrive;
@@ -651,11 +617,8 @@ static void Red_LED_Controller_Task( void *pvParameters )
 					}
 
 				}
-				//vTaskDelay(500);
 			}
 		}
-
-
 
 		for(int i = 7; i >= 0; i--){
 
@@ -666,44 +629,13 @@ static void Red_LED_Controller_Task( void *pvParameters )
 				GPIO_ResetBits(GPIOC, GPIO_Pin_6);
 			}
 
-				//vTaskDelay(5);
 				GPIO_SetBits(GPIOC, GPIO_Pin_7);
-				//vTaskDelay(5);
 				GPIO_ResetBits(GPIOC, GPIO_Pin_7);
 
 			printf("arr value:  %d \n", arr[i]);
 
 		}
 		vTaskDelay(500);
-	}
-}
-
-
-/*-----------------------------------------------------------*/
-
-static void Amber_LED_Controller_Task( void *pvParameters )
-{
-
-//	uint16_t rx_data;
-	while(1)
-	{
-//		if(xQueueReceive(xQueue_handle, &rx_data, 500))
-//		{
-//			if(rx_data == amber)
-//			{
-		vTaskDelay(250);
-//				STM_EVAL_LEDOff(amber_led);
-//				printf("Amber Off.\n");
-//			}
-//			else
-//			{
-//				if( xQueueSend(xQueue_handle,&rx_data,1000))
-//					{
-//						printf("AmberTask GRP (%u).\n", rx_data); // Got wrong Package
-//						vTaskDelay(500);
-//					}
-//			}
-//		}
 	}
 }
 
