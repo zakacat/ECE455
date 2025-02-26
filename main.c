@@ -164,20 +164,25 @@ static void prvSetupHardware( void );
  */
 //Set up the GPIO pins for the LEDs
 static void Setup_GPIO_Traffic();
-
+//Set up for the pins connected to the Pot
 static void Setup_GPIO_Pot();
 //Serial to Parallel Converter
 static void Setup_SPC();
 //Set up the ADC peripheral for potentiometer
 static void Setup_ADC();
 
+//This is the task for reading the pot
 static void Pot_Reader_Task( void *pvParameters );
+//This is the task for switching the traffic light
 static void Traffic_Light_Controller_Task( void *pvParameters );
+//This is the task for the clock that controls the second set of lights
 static void Hardware_Clock_Task( void *pvParameters );
+//This is the task for the car generation and movement thru the traffic light
 static void Car_Generation_Task( void *pvParameters );
 
-
+//Queue one is fed pot values
 xQueueHandle xQueue_handle = 0;
+//Queue two passes light values
 xQueueHandle xQueue_handle2 = 0;
 
 
@@ -202,20 +207,24 @@ int main(void)
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
 	vQueueAddToRegistry( xQueue_handle, "Potentiometer" );
-
 	vQueueAddToRegistry( xQueue_handle2, "TrafficLight" );
 
+	//Create the tasks to be handled in the background
 	xTaskCreate( Pot_Reader_Task, "Pot_Reader", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 	xTaskCreate( Traffic_Light_Controller_Task, "Traffic_Light_Controller", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate( Hardware_Clock_Task, "Hardware_Clock", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate( Car_Generation_Task, "Car_Generation", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
+	//Setup traffic pins
 	Setup_GPIO_Traffic();
 
+	//Setup Pot pins
 	Setup_GPIO_Pot();
 
+	//Setup the ADC to read the pot
 	Setup_ADC();
 
+	//Setup Serial to Parallel converters
 	Setup_SPC();
 
 	/* Start the tasks and timer running. */
@@ -312,22 +321,29 @@ static void Setup_ADC(){
 	//Enable the RCC ADC 1 clock
 	RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
 
+	//Make the continuous mode disabled
 	ADC_InitTypeDef ADC_InitStruct;
 	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
 
 	//I don't think that we care about the data alignment as long as it is consistent
 	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
 
+	//Disable external trigger conversion
 	ADC_InitStruct.ADC_ExternalTrigConv = DISABLE;
 
+	//Not important
 	ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
 
+	//We only one conversion
 	ADC_InitStruct.ADC_NbrOfConversion = 1;
 
+	//We set the resolution 12 bits
 	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
 
+	//Disable scan conversion mode
 	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
 
+	//Initialize the struct
 	ADC_Init(ADC1, &ADC_InitStruct);
 
 	//Set the ADC command
@@ -341,6 +357,10 @@ static void Setup_ADC(){
 
 
 /*-----------------------------------------------------------*/
+//This task is for reading the pot:
+//It reads the pot and then it loads the value into queue 1 only if the queue
+//is empty. We are treating this as a queue of one. This task repeats when it can
+//after 200 ticks.
 
 static void Pot_Reader_Task( void *pvParameters )
 {
@@ -348,13 +368,15 @@ static void Pot_Reader_Task( void *pvParameters )
 	while(1)
 	{
 
+		//Start ADC conversion
 		ADC_SoftwareStartConv(ADC1);
 
 		uint16_t pot = 0 ;
 
+		//Check to see if the ADC is done the conversion
 		if(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC)){
 
-
+			//Get the ADC conversion value
 			pot = ADC_GetConversionValue(ADC1);
 
 			printf("This is the pot value:  %u \n", pot);
@@ -362,7 +384,7 @@ static void Pot_Reader_Task( void *pvParameters )
 		}
 
 		if(!xQueueReceive(xQueue_handle, &pot, 0)){ //Only if queue is empty, add a value to it
-			if( xQueueSend(xQueue_handle,&pot,1000))
+			if( xQueueSend(xQueue_handle,&pot,1000)) // Try to put
 			{
 				printf("Manager: %u ON!\n", pot);
 				vTaskDelay(200);//Add a delay to allow other tasks to go
@@ -390,8 +412,8 @@ static void Traffic_Light_Controller_Task( void *pvParameters )
 	char curr = 'g'; // Light starts on green
 
 	GPIO_ResetBits(GPIOC, GPIO_Pin_8); //Reset first 8 LEDs at the beginning of the instance
-	vTaskDelay(50);
-	GPIO_SetBits(GPIOC, GPIO_Pin_8);
+	vTaskDelay(50); //Delay for almost negligible duration
+	GPIO_SetBits(GPIOC, GPIO_Pin_8); //Set all the bits, to clear the LEDs
 
 
 	while(1)
@@ -400,8 +422,6 @@ static void Traffic_Light_Controller_Task( void *pvParameters )
 		//check the pot
 		if(xQueueReceive(xQueue_handle, &pot, 500))
 		{
-
-			printf("Blue task.\n");
 
 			if(pot < 1100){ // if pot is less than 1100, then red is shorter, and green is longer
 				red = 2000;
@@ -453,8 +473,8 @@ static void Traffic_Light_Controller_Task( void *pvParameters )
 			vTaskDelay(red);
 
 		}
-		if(!xQueueReceive(xQueue_handle2, &curr, 0)){
-			if( xQueueSend(xQueue_handle2,&curr,1000))
+		if(!xQueueReceive(xQueue_handle2, &curr, 0)){//If there is nothing in the traffic light queue
+			if( xQueueSend(xQueue_handle2, &curr,1000))//Try to add the traffic light value to the queue
 			{
 				printf("traffic sent: %c ON!\n", curr);
 			}
@@ -497,11 +517,11 @@ static void Car_Generation_Task( void *pvParameters )
 
 	int val; //rando value
 
-	int arr[8] = {0,0,0,0,0,0,0,0}; //Simulate the first 8 leds
+	int arr[8] = {0,0,0,0,0,0,0,0}; //Simulate the first 8 LEDs
 
 	int carArrive = 0; //Whether a car will arrive next second
 
-	uint16_t pot; // pot value
+	uint16_t pot; //pot value
 
 	int wait = 0; //how many cars to wait
 
@@ -522,16 +542,16 @@ static void Car_Generation_Task( void *pvParameters )
 		//check the pot
 		if(xQueueReceive(xQueue_handle, &pot, 0)){
 
-			if(pot < 1100){ // if pot is less than 1100, then red is longer, and green is shorter
+			if(pot < 1100){ // if pot is less than 1100, don't wait to generate a car
 
 				wait = 0;
 			}
-			else if (pot > 2200){ // If pot is more than 2200, then red is shorter, and green is longer
+			else if (pot > 2200){ // If pot is more than 2200, wait the longest to generate a car
 
 				wait = 5;
 
 			}
-			else //else, then red and green and are the same as yellow
+			else //else, wait an average amount before generating a car
 			{
 				wait = 3;
 			}
@@ -544,6 +564,7 @@ static void Car_Generation_Task( void *pvParameters )
 
 		printf("VALUE: %d ON!\n", val);
 		//fastest car generation setting.
+		//If the random value is greater than 3 and the iteration count is greater than the wait time
 		if(val > 2 && count > wait){
 			carArrive = 1;
 			count = 0;
@@ -552,7 +573,7 @@ static void Car_Generation_Task( void *pvParameters )
 			carArrive = 0;
 		}
 
-		//SHIFT LOGIC
+		//SHIFT LOGIC to modify the array
 
 		if(curr == 'g'){
 		//If the light is green.
@@ -574,7 +595,6 @@ static void Car_Generation_Task( void *pvParameters )
 				else if(i == 0){
 					arr[i] = carArrive;
 				}
-				//vTaskDelay(500);
 			}
 		}
 		else{
@@ -620,6 +640,7 @@ static void Car_Generation_Task( void *pvParameters )
 			}
 		}
 
+		//Every iteration update the array value into the first 8 LEDs
 		for(int i = 7; i >= 0; i--){
 
 			if(arr[i] == 1){
@@ -701,4 +722,3 @@ static void prvSetupHardware( void )
 	/* TODO: Setup the clocks, etc. here, if they were not configured before
 	main() was called. */
 }
-
