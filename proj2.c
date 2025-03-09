@@ -153,6 +153,16 @@ functionality.
 /*-----------------------------------------------------------*/
 #define mainQUEUE_LENGTH 3
 
+#define amber  	0
+#define green  	1
+#define red  	2
+#define blue  	3
+
+#define amber_led	LED3
+#define green_led	LED4
+#define red_led		LED5
+#define blue_led	LED6
+
 /*
  * TODO: Implement this function for any hardware specific clock configuration
  * that was not already performed before main() was called.
@@ -172,13 +182,48 @@ static void Setup_SPC();
 //Set up the ADC peripheral for potentiometer
 static void Setup_ADC();
 
+
+
+static void Deadline_Driven_Scheduler( void *pvParameters );
+static void User_Defined_Task( void *pvParameters );
+static void Deadline_Driven_Task_Generator( void *pvParameters );
+static void Monitor_Task( void *pvParameters );
+
+
+xQueueHandle xQueue_handle = 0; //The queue for sending new tasks
+xQueueHandle xQueue_handle2 = 0; //The queue for how many active tasks there are
+xQueueHandle xQueue_handle3 = 0;
+
+typedef enum {PERIODIC,APERIODIC} task_type ;//Should they all be in real time?
+
+typedef struct dd_task { //A dd_task which will likely be food
+	TaskHandle_t t_handle;
+	task_type type;
+	uint32_t task_id; //Can be in real time
+	uint32_t release_time; //Should be in real time
+	uint32_t absolute_deadline; //Should be in real time
+	uint32_t completion_time; //Should be in real time
+	uint32_t execution_time;//Execution time
+
+	struct dd_task *next_task;
+} dd_task;
+
+//typedef struct dd_task_list{ // Probably this will be represented by the chef's cooking queue
+//	struct dd_task task;
+//	struct dd_task_list *next_task;
+//} dd_task_list;
+
+dd_task activeList;
+dd_task completedList;
+dd_task overdueList;
+
 //This function receives all of the information necessary to create a
 //new dd_taskstruct(excluding the release time and completion time.
-static void release_dd_task_func();
+static void release_dd_task_func(TaskHandle_t, task_type, uint32_t, uint32_t, uint32_t); //The is the same as the create
 
 //This function receives the ID of the DD-Task which has completed its execution.
 //The ID is packaged as a message and sent to a queue for the DDS to receive
-static void complete_dd_task_func();
+static void complete_dd_task_func(uint32_t); //This is the same as delete
 
 //This function sends a message to a queue requesting the Active Task List from the DDS.
 //Once a response is received from the DDS, the function returns the list.
@@ -192,36 +237,15 @@ static void get_completed_dd_task_list();
 //Once a response is received from the DDS, the function returns the list.
 static void get_overdue_dd_task_list();
 
-static void Pot_Reader_Task( void *pvParameters );
-static void Traffic_Light_Controller_Task( void *pvParameters );
-static void Hardware_Clock_Task( void *pvParameters );
-static void Car_Generation_Task( void *pvParameters );
-
-
-xQueueHandle xQueue_handle = 0;
-xQueueHandle xQueue_handle2 = 0;
-
-typedef enum {PERIODIC,APERIODIC} task_type ;//Should they all be in real time?
-
-typedef struct dd_task { //A dd_task which will likely be food
-	TaskHandle_t t_handle;
-	task_type type;
-	uint32_t task_id; //Can be in real time
-	uint32_t release_time; //Should be in real time
-	uint32_t absolute_deadline; //Should be in real time
-	uint32_t completion_time; //Should be in real time
-};
-
-typedef struct dd_task_list{ // Probably this will be represented by the chef's cooking queue
-	struct dd_task task;
-	struct dd_task_list *next_task;
-};
-
-
 /*-----------------------------------------------------------*/
 
 int main(void)
 {
+	/* Initialize LEDs */
+	STM_EVAL_LEDInit(amber_led);
+	STM_EVAL_LEDInit(green_led);
+	STM_EVAL_LEDInit(red_led);
+	STM_EVAL_LEDInit(blue_led);
 
 
 	/* Configure the system ready to run the demo.  The clock configuration
@@ -232,20 +256,26 @@ int main(void)
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
 	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( uint16_t ) );	/* The size of each item the queue holds. */
+							sizeof( dd_task ) );	/* The size of each item the queue holds. */
 
 	xQueue_handle2 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-								sizeof( char ) );	/* The size of each item the queue holds. */
+								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+
+	xQueue_handle3 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "Potentiometer" );
+	vQueueAddToRegistry( xQueue_handle, "Generator tasks" );
 
-	vQueueAddToRegistry( xQueue_handle2, "TrafficLight" );
+	vQueueAddToRegistry( xQueue_handle2, "Active list length request" );
 
-	xTaskCreate( Pot_Reader_Task, "Pot_Reader", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Traffic_Light_Controller_Task, "Traffic_Light_Controller", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Hardware_Clock_Task, "Hardware_Clock", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Car_Generation_Task, "Car_Generation", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	vQueueAddToRegistry( xQueue_handle3, "Active list length value" );
+
+	//All these priorities are currently the same
+	xTaskCreate( Deadline_Driven_Scheduler, "Deadline_Driven_Scheduler", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+	xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Deadline_Driven_Task_Generator, "Deadline_Driven_Task_Generator", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 	Setup_GPIO_Traffic();
 
@@ -260,6 +290,81 @@ int main(void)
 
 	return 0;
 }
+
+//This function receives all of the information necessary to create a
+//new dd_taskstruct(excluding the release time and completion time.
+static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t execution_time ,uint32_t absolute_deadline){//The is the same as the create
+
+
+	struct dd_task newTask;
+
+	newTask.t_handle = t_handle;
+	newTask.type = type;
+	newTask.task_id = task_id;
+	newTask.absolute_deadline = absolute_deadline;
+	newTask.execution_time = execution_time;
+
+
+	if( xQueueSend(xQueue_handle,&newTask,100)) // Try to put the task into the queue
+	{
+		printf("Task Sent to DDS!: %lu ON!\n", newTask.task_id);
+		//vTaskDelay(200);//Add a delay to allow other tasks to go
+	}
+
+
+	//This one creates the_dd_task and then adds it to the activeList
+}
+
+//This function receives the ID of the DD-Task which has completed its execution.
+//The ID is packaged as a message and sent to a queue for the DDS to receive
+static void complete_dd_task_func(uint32_t task_id){//This is the same as delete
+
+
+}
+
+//This function sends a message to a queue requesting the Active Task List from the DDS.
+//Once a response is received from the DDS, the function returns the list.
+static void get_active_dd_task_list(){
+
+	uint32_t count = 1;
+
+	if( xQueueSend(xQueue_handle2,&count,100)) // Try to put the task into the queue
+	{
+		printf("Active List Length Request Sent to DDS!: %u ON!\n", count);
+		//vTaskDelay(200);//Add a delay to allow other tasks to go
+	}
+
+	//wait for something else to be added to the queue
+//	vtaskdelay(100);
+//
+//	if(xQueueReceive(xQueue_handle3, &count, 100))
+//	{
+//		printf("Active List Length Recevied! \n");
+//	}
+
+//	return count;
+
+
+}
+
+//This function sends a message to a queue requesting the Completed Task List from the DDS.
+//Once a response is received from the DDS, the function returns the list
+//static dd_task_list get_completed_dd_task_list(){
+//
+//	dd_task_list completedList;
+//
+//	return completedList;
+//}
+
+//This function sends a message to a queue requesting the Overdue Task List from the DDS.
+//Once a response is received from the DDS, the function returns the list.
+//static dd_task_list get_overdue_dd_task_list(){
+//
+//	dd_task_list overdueList;
+//
+//	return overdueList;
+//}
+
 
 //Set up the GPIO pins for the LEDs
 static void Setup_GPIO_Traffic(){
@@ -379,13 +484,136 @@ static void Setup_ADC(){
 
 /*-----------------------------------------------------------*/
 
-static void Pot_Reader_Task( void *pvParameters )
+static void Deadline_Driven_Scheduler( void *pvParameters )
 {
+	//This will be EDF, earliest deadline first
+	//This is the only thing that touches the list
+	dd_task newTask;
+	dd_task* activeHead;
+	dd_task* activeTail;
+	uint32_t count;
 
 	while(1)
 	{
 
-		printf("Ftask 1 !\n");
+		//if there is a new task waiting to be added to the active task list
+		if(xQueueReceive(xQueue_handle, &newTask, 500))
+		{
+			if(activeTail == NULL){
+				activeTail = &newTask;
+				activeHead = &newTask;
+			}
+			else{
+				activeTail->next_task = &newTask;
+			}
+			//activeTail->task = newTask;
+			//activeTail = activeTail->next_task;
+
+			//include logic for rearranging the list
+			//check for earliest deadline
+			//start the first task using the handle
+			printf("DDS add task to active list %u \n", newTask.task_id);
+			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
+		}
+
+
+		//if the monitor task wants to know how many active tasks there are
+		if(xQueueReceive(xQueue_handle2, &count, 500))
+		{
+			printf("The amount of active tasks are %u\n", count);
+			if(count == 1){
+
+				count = 0;
+
+				dd_task* countList = activeHead;
+
+				//printf("DDS count list pointer %p \n", (void *) countList);
+				while(countList->next_task != NULL){
+					count ++;
+
+					countList = countList->next_task;
+				}
+
+			}
+			printf("The amount of active tasks are %u", count);
+
+		}
+
+		printf("Deadline_Driven_Scheduler !\n");
+
+
+		vTaskDelay(1); //Pass off the CPU to any task that needs it
+
+	}
+}
+
+/*-----------------------------------------------------------*/
+
+static void User_Defined_Task( void *pvParameters )
+{
+
+
+
+	while(1)
+	{
+		//A User-Defined Task would normally perform something useful such as a calculation;
+		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
+		//It is recommended to make use of the LEDs on the discovery board during development in order to provide
+		//a visual indication of which User-Defined Task is currently executing
+
+		//STM_EVAL_LEDOn(amber_led);
+
+		//STM_EVAL_LEDOff(amber_led);
+
+		//printf("User_Defined_Tasks !\n");
+		//vTaskDelay(2000);
+
+	}
+}
+
+
+/*-----------------------------------------------------------*/
+
+static void Deadline_Driven_Task_Generator( void *pvParameters )
+{
+	uint32_t taskCount = 1;
+	while(1)
+	{
+		uint32_t now = (unsigned)time(NULL);
+		//Prepare task specific information create an instance of a DD task
+		//by calling release_dd_task()
+
+		TaskHandle_t t_handle;
+
+		t_handle = xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+		task_type type = PERIODIC;
+
+		uint32_t task_id = taskCount;
+		taskCount ++;
+
+		uint32_t execution_time; // or 150 or 250
+		uint32_t absolute_deadline;
+
+		//task 1
+		if(taskCount % 1 == 0){
+
+			execution_time = 95; // or 150 or 250
+			absolute_deadline = now + 500; //Deadline is the now plus period
+		}
+		else if (taskCount % 2 == 0){ //task 2
+			execution_time = 150; // or 150 or 250
+			absolute_deadline = now + 500; //Deadline is the now plus period
+		}
+		else { //task 3
+			execution_time = 250; // or 150 or 250
+			absolute_deadline = now + 750; //Deadline is the now plus period
+		}
+
+		printf("DD task created %u !\n", task_id);
+
+		release_dd_task_func(t_handle, type, task_id, execution_time, absolute_deadline);
+
 
 		vTaskDelay(2000);
 
@@ -394,45 +622,28 @@ static void Pot_Reader_Task( void *pvParameters )
 
 /*-----------------------------------------------------------*/
 
-static void Traffic_Light_Controller_Task( void *pvParameters )
+static void Monitor_Task( void *pvParameters )
 {
-
-
+	uint32_t numberOfActiveTasks;
+	uint32_t numberOfCompletedTasks;
+	uint32_t numberOfOverdueTasks;
 
 	while(1)
 	{
+		//Collects information from the DDS using the get_active_dd_task_list,
+		//get_complete_dd_task_list, and get_overdue_dd_task_listfunctions.
 
-		printf("Ftask 2 !\n");
-		vTaskDelay(2000);
+		//Report the number of tasks in each list to the user (e.g.print text to the console)
 
-	}
-}
+		//Priority: Must be allowed to execute even if there are active or overdue tasks so that it can
+		//continue to collect information and report system information
 
-
-/*-----------------------------------------------------------*/
-
-static void Hardware_Clock_Task( void *pvParameters )
-{
-
-	while(1)
-	{
-		printf("Ftask 3 !\n");
-		vTaskDelay(2000);
+		//Would be nice to hook this up to the user button
+		get_active_dd_task_list();
 
 
-	}
-}
-
-/*-----------------------------------------------------------*/
-
-static void Car_Generation_Task( void *pvParameters )
-{
-
-
-	while(1)
-	{
-		printf("Ftask 4 !\n");
-		vTaskDelay(2000);
+		printf("Monitor_Task!\n");
+		vTaskDelay(5000);
 	}
 }
 
