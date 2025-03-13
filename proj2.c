@@ -256,7 +256,7 @@ int main(void)
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
 	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-							sizeof( dd_task ) );	/* The size of each item the queue holds. */
+							sizeof( struct dd_task ) );	/* The size of each item the queue holds. */
 
 	xQueue_handle2 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
 								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
@@ -272,10 +272,10 @@ int main(void)
 	vQueueAddToRegistry( xQueue_handle3, "Active list length value" );
 
 	//All these priorities are currently the same
-	xTaskCreate( Deadline_Driven_Scheduler, "Deadline_Driven_Scheduler", configMINIMAL_STACK_SIZE, NULL, 2, NULL);
-	xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Deadline_Driven_Task_Generator, "Deadline_Driven_Task_Generator", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Deadline_Driven_Scheduler, "Deadline_Driven_Scheduler", configMINIMAL_STACK_SIZE, NULL, 10, NULL);
+	//xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Deadline_Driven_Task_Generator, "Deadline_Driven_Task_Generator", configMINIMAL_STACK_SIZE, NULL, 9, NULL);
+	//xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 	Setup_GPIO_Traffic();
 
@@ -296,18 +296,18 @@ int main(void)
 static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t task_id, uint32_t execution_time ,uint32_t absolute_deadline){//The is the same as the create
 
 
-	struct dd_task newTask;
+	struct dd_task *newTask = malloc(sizeof(dd_task));
 
-	newTask.t_handle = t_handle;
-	newTask.type = type;
-	newTask.task_id = task_id;
-	newTask.absolute_deadline = absolute_deadline;
-	newTask.execution_time = execution_time;
+	newTask->t_handle = t_handle;
+	newTask->type = type;
+	newTask->task_id = task_id;
+	newTask->absolute_deadline = absolute_deadline;
+	newTask->execution_time = execution_time;
+	printf("Task Sent to DDS!: %u ON!\n", (int)task_id);
 
-
-	if( xQueueSend(xQueue_handle,&newTask,100)) // Try to put the task into the queue
+	if( xQueueSend(xQueue_handle, &newTask, 100)) // Try to put the task into the queue
 	{
-		printf("Task Sent to DDS!: %lu ON!\n", newTask.task_id);
+		printf("Task Sent to DDS!: %u ON!\n", (int)newTask->task_id);
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
 	}
 
@@ -330,7 +330,7 @@ static void get_active_dd_task_list(){
 
 	if( xQueueSend(xQueue_handle2,&count,100)) // Try to put the task into the queue
 	{
-		printf("Active List Length Request Sent to DDS!: %u ON!\n", count);
+		printf("Active List Length Request Sent to DDS!: %d ON!\n", (int)count);
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
 	}
 
@@ -488,7 +488,7 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 {
 	//This will be EDF, earliest deadline first
 	//This is the only thing that touches the list
-	dd_task newTask;
+	dd_task* newTask;
 	dd_task* activeHead;
 	dd_task* activeTail;
 	uint32_t count;
@@ -499,12 +499,14 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 		//if there is a new task waiting to be added to the active task list
 		if(xQueueReceive(xQueue_handle, &newTask, 500))
 		{
+
+			printf("DDS add task to active list %u \n", (int)newTask->task_id);
 			if(activeTail == NULL){
-				activeTail = &newTask;
-				activeHead = &newTask;
+				activeTail = newTask;
+				activeHead = newTask;
 			}
 			else{
-				activeTail->next_task = &newTask;
+				activeTail->next_task = newTask;
 			}
 			//activeTail->task = newTask;
 			//activeTail = activeTail->next_task;
@@ -512,7 +514,7 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 			//include logic for rearranging the list
 			//check for earliest deadline
 			//start the first task using the handle
-			printf("DDS add task to active list %u \n", newTask.task_id);
+
 			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
 		}
 
@@ -520,7 +522,7 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 		//if the monitor task wants to know how many active tasks there are
 		if(xQueueReceive(xQueue_handle2, &count, 500))
 		{
-			printf("The amount of active tasks are %u\n", count);
+			printf("The amount of active tasks are %d \n", (int)count);
 			if(count == 1){
 
 				count = 0;
@@ -542,7 +544,7 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 		printf("Deadline_Driven_Scheduler !\n");
 
 
-		vTaskDelay(1); //Pass off the CPU to any task that needs it
+		vTaskDelay(500); //Pass off the CPU to any task that needs it
 
 	}
 }
@@ -566,7 +568,7 @@ static void User_Defined_Task( void *pvParameters )
 		//STM_EVAL_LEDOff(amber_led);
 
 		//printf("User_Defined_Tasks !\n");
-		//vTaskDelay(2000);
+		vTaskDelay(500);
 
 	}
 }
@@ -585,7 +587,8 @@ static void Deadline_Driven_Task_Generator( void *pvParameters )
 
 		TaskHandle_t t_handle;
 
-		t_handle = xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+		xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, &t_handle);
+		//vTaskSuspend(t_handle);
 
 		task_type type = PERIODIC;
 
