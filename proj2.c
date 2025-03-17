@@ -169,30 +169,18 @@ functionality.
  */
 static void prvSetupHardware( void );
 
-/*
- * The queue send and receive tasks as described in the comments at the top of
- * this file.
- */
-//Set up the GPIO pins for the LEDs
-static void Setup_GPIO_Traffic();
 
-static void Setup_GPIO_Pot();
-//Serial to Parallel Converter
-static void Setup_SPC();
-//Set up the ADC peripheral for potentiometer
-static void Setup_ADC();
-
-
-
-static void Deadline_Driven_Scheduler( void *pvParameters );
+static void Scheduler_DD( void *pvParameters );
 static void User_Defined_Task( void *pvParameters );
-static void Deadline_Driven_Task_Generator( void *pvParameters );
+static void Generator_DD( void *pvParameters );
 static void Monitor_Task( void *pvParameters );
 
 
-xQueueHandle xQueue_handle = 0; //The queue for sending new tasks
-xQueueHandle xQueue_handle2 = 0; //The queue for how many active tasks there are
-xQueueHandle xQueue_handle3 = 0;
+xQueueHandle xQueue_handle1 = 0; //The queue for sending new tasks
+xQueueHandle xQueue_handle2 = 0; //The queue for completing tasks
+xQueueHandle xQueue_handle3 = 0; //The queue for monitoring active tasks
+xQueueHandle xQueue_handle4 = 0; //The queue for monitoring completed tasks
+xQueueHandle xQueue_handle5 = 0; //The queue for monitoring overdue tasks
 
 typedef enum {PERIODIC,APERIODIC} task_type ;//Should they all be in real time?
 
@@ -255,7 +243,9 @@ int main(void)
 
 	/* Create the queue used by the queue send and queue receive tasks.
 	http://www.freertos.org/a00116.html */
-	xQueue_handle = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+
+
+	xQueue_handle1 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
 							sizeof( struct dd_task ) );	/* The size of each item the queue holds. */
 
 	xQueue_handle2 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
@@ -263,27 +253,31 @@ int main(void)
 
 	xQueue_handle3 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
 								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+	xQueue_handle4 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+	xQueue_handle5 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
-	vQueueAddToRegistry( xQueue_handle, "Generator tasks" );
+	vQueueAddToRegistry( xQueue_handle1, "Generator tasks" );
 
-	vQueueAddToRegistry( xQueue_handle2, "Active list length request" );
+	vQueueAddToRegistry( xQueue_handle2, "Complete" );
 
-	vQueueAddToRegistry( xQueue_handle3, "Active list length value" );
+	vQueueAddToRegistry( xQueue_handle3, "Monitor active task" );
+
+	vQueueAddToRegistry( xQueue_handle4, "Monitor complete task" );
+
+	vQueueAddToRegistry( xQueue_handle5, "Monitor overdue task" );
+
+
+
 
 	//All these priorities are currently the same
-	xTaskCreate( Deadline_Driven_Scheduler, "Deadline_Driven_Scheduler", configMINIMAL_STACK_SIZE, NULL, 10, NULL);
+	xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 9, NULL);
 	//xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Deadline_Driven_Task_Generator, "Deadline_Driven_Task_Generator", configMINIMAL_STACK_SIZE, NULL, 9, NULL);
+	xTaskCreate( Generator_DD, "Generator_DD", configMINIMAL_STACK_SIZE, NULL, 8, NULL);
 	//xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
-	Setup_GPIO_Traffic();
-
-	Setup_GPIO_Pot();
-
-	Setup_ADC();
-
-	Setup_SPC();
 
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
@@ -305,7 +299,7 @@ static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t
 	newTask->execution_time = execution_time;
 	printf("Task Sent to DDS!: %u ON!\n", (int)task_id);
 
-	if( xQueueSend(xQueue_handle, &newTask, 100)) // Try to put the task into the queue
+	if( xQueueSend(xQueue_handle1, &newTask, 100)) // Try to put the task into the queue
 	{
 		printf("Task Sent to DDS!: %u ON!\n", (int)newTask->task_id);
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
@@ -319,6 +313,10 @@ static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t
 //The ID is packaged as a message and sent to a queue for the DDS to receive
 static void complete_dd_task_func(uint32_t task_id){//This is the same as delete
 
+	if( xQueueSend(xQueue_handle2, task_id, 100));
+
+	//vTaskDelete( task_id);
+
 
 }
 
@@ -328,7 +326,7 @@ static void get_active_dd_task_list(){
 
 	uint32_t count = 1;
 
-	if( xQueueSend(xQueue_handle2,&count,100)) // Try to put the task into the queue
+	if( xQueueSend(xQueue_handle3,&count,100)) // Try to put the task into the queue
 	{
 		printf("Active List Length Request Sent to DDS!: %d ON!\n", (int)count);
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
@@ -367,124 +365,11 @@ static void get_active_dd_task_list(){
 
 
 //Set up the GPIO pins for the LEDs
-static void Setup_GPIO_Traffic(){
-
-	printf("Setup_GPIO_Traffic enter\n");
-
-	//Enable the RCC peripheral clock port C GPIOs
-	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
-
-	//Create intialization struct
-	GPIO_InitTypeDef GPIO_InitStruct;
-
-	//Configure Pin 0 = RED Light, PIN 1 = YELLER, PIN 2 = GREEN
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 ;
-	//Set Mode to output
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
-	//Set to Push-Pull
-	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-	//Set speed to slowest speed to avoid noise
-	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
-	//Set to no pull
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
-	//Initialize the port
-	GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-	printf("Setup_GPIO_Traffic exit\n");
-
-}
-
-static void Setup_GPIO_Pot(){
-
-	printf("Setup_GPIO_Pot enter\n");
-	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
-
-	//Create intialization struct
-	GPIO_InitTypeDef GPIO_InitStruct;
-	//Isolate Pin C3
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
-	//Set Mode to analog in
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AN;
-	//Set to no pull
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
-
-	//Initialize the port
-	GPIO_Init(GPIOC, &GPIO_InitStruct);
-	printf("Setup_GPIO_Pot exit\n");
-
-}
-//Serial to Parallel Converter
-static void Setup_SPC(){
-
-	printf("Setup_SPC enter\n");
-	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_GPIOCEN, ENABLE);
-
-	//Create intialization struct
-	GPIO_InitTypeDef GPIO_InitStruct;
-
-	//Isolate Pin C8 = shift reset, C7 = shift clock, C6 = shift data, C4 = 2nd shift clock
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_7| GPIO_Pin_6 | GPIO_Pin_4;
-	//Set Mode to output
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
-	//Set to Push-Pull
-	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
-	//Set speed to slowest speed to avoid noise
-	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_2MHz;
-	//Set to no pull
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
-
-
-
-	//Initialize the port
-	GPIO_Init(GPIOC, &GPIO_InitStruct);
-
-	//1 means not reset
-	GPIO_SetBits(GPIOC, GPIO_Pin_8);
-	//Turn off the first SPC clock
-	GPIO_ResetBits(GPIOC, GPIO_Pin_7);
-	printf("Setup_SPC exit\n");
-
-}
-
-//Set up the ADC peripheral for potentiometer
-static void Setup_ADC(){
-
-	printf("Setup_ADC enter\n");
-
-	//Enable the RCC ADC 1 clock
-	RCC_APB2PeriphClockCmd(RCC_APB2ENR_ADC1EN, ENABLE);
-
-	ADC_InitTypeDef ADC_InitStruct;
-	ADC_InitStruct.ADC_ContinuousConvMode = DISABLE;
-
-	//I don't think that we care about the data alignment as long as it is consistent
-	ADC_InitStruct.ADC_DataAlign = ADC_DataAlign_Right;
-
-	ADC_InitStruct.ADC_ExternalTrigConv = DISABLE;
-
-	ADC_InitStruct.ADC_ExternalTrigConvEdge = ADC_ExternalTrigConvEdge_None;
-
-	ADC_InitStruct.ADC_NbrOfConversion = 1;
-
-	ADC_InitStruct.ADC_Resolution = ADC_Resolution_12b;
-
-	ADC_InitStruct.ADC_ScanConvMode = DISABLE;
-
-	ADC_Init(ADC1, &ADC_InitStruct);
-
-	//Set the ADC command
-	ADC_Cmd(ADC1, ENABLE);
-
-	//Config the channel
-	ADC_RegularChannelConfig(ADC1, ADC_Channel_13, 1, ADC_SampleTime_84Cycles);
-
-	printf("Setup_ADC exit\n");
-}
 
 
 /*-----------------------------------------------------------*/
 
-static void Deadline_Driven_Scheduler( void *pvParameters )
+static void Scheduler_DD( void *pvParameters )
 {
 	//This will be EDF, earliest deadline first
 	//This is the only thing that touches the list
@@ -497,10 +382,10 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 	{
 
 		//if there is a new task waiting to be added to the active task list
-		if(xQueueReceive(xQueue_handle, &newTask, 500))
+		if(xQueueReceive(xQueue_handle1, &newTask, 500))
 		{
 
-			printf("DDS add task to active list %u \n", (int)newTask->task_id);
+			printf("DDS Q1 read add task to active list %u \n", (int)newTask->task_id);
 			if(activeTail == NULL){
 				activeTail = newTask;
 				activeHead = newTask;
@@ -518,11 +403,37 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
 		}
 
+		uint32_t task_id;
+		//if a task is completed, will be removed from active list and sent to completed
+		if(xQueueReceive(xQueue_handle2, &task_id, 500))
+		{
+
+			printf("DDS Q2 add task to complete list %u \n", task_id);
+//			if(activeTail == NULL){
+//				activeTail = newTask;
+//				activeHead = newTask;
+//			}
+//			else{
+//				activeTail->next_task = newTask;
+//			}
+//			//activeTail->task = newTask;
+//			//activeTail = activeTail->next_task;
+//
+//			//include logic for rearranging the list
+//			//check for earliest deadline
+//			//start the first task using the handle
+//
+//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
+//			printf("delete task next \n");
+//			vTaskDelete( task_id);
+//			printf("task deleted \n");
+		}
+
 
 		//if the monitor task wants to know how many active tasks there are
-		if(xQueueReceive(xQueue_handle2, &count, 500))
+		if(xQueueReceive(xQueue_handle3, &count, 500))
 		{
-			printf("The amount of active tasks are %d \n", (int)count);
+			printf("DDS Q3 The amount of active tasks are %d \n", (int)count);
 			if(count == 1){
 
 				count = 0;
@@ -541,7 +452,52 @@ static void Deadline_Driven_Scheduler( void *pvParameters )
 
 		}
 
-		printf("Deadline_Driven_Scheduler !\n");
+		//if the monitor task wants to know how many completed tasks there are
+		if(xQueueReceive(xQueue_handle4, &count, 500))
+		{
+			printf("DDS Q4 The amount of completed tasks are");
+//			printf("The amount of completed tasks are %d \n", (int)count);
+//			if(count == 1){
+//
+//				count = 0;
+//
+//				dd_task* countList = activeHead;
+//
+//				//printf("DDS count list pointer %p \n", (void *) countList);
+//				while(countList->next_task != NULL){
+//					count ++;
+//
+//					countList = countList->next_task;
+//				}
+//
+//			}
+//			printf("The amount of active tasks are %u", count);
+
+		}
+
+		if(xQueueReceive(xQueue_handle5, &count, 500))
+		{
+			printf("DDS Q5 The amount of overdue tasks are");
+//			printf("The amount of overdue tasks are %d \n", (int)count);
+//			if(count == 1){
+//
+//				count = 0;
+//
+//				dd_task* countList = activeHead;
+//
+//				//printf("DDS count list pointer %p \n", (void *) countList);
+//				while(countList->next_task != NULL){
+//					count ++;
+//
+//					countList = countList->next_task;
+//				}
+//
+//			}
+//			printf("The amount of active tasks are %u", count);
+
+		}
+
+		printf("Scheduler_DD DONE !\n");
 
 
 		vTaskDelay(500); //Pass off the CPU to any task that needs it
@@ -556,8 +512,8 @@ static void User_Defined_Task( void *pvParameters )
 
 
 
-	while(1)
-	{
+	//while(1)
+	//{
 		//A User-Defined Task would normally perform something useful such as a calculation;
 		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
 		//It is recommended to make use of the LEDs on the discovery board during development in order to provide
@@ -567,33 +523,40 @@ static void User_Defined_Task( void *pvParameters )
 
 		//STM_EVAL_LEDOff(amber_led);
 
-		//printf("User_Defined_Tasks !\n");
+		printf("User_Defined_Tasks !\n");
+		complete_dd_task_func( pvParameters);
+		printf("called complete(), now back in USER DEFINED TASK");
 		vTaskDelay(500);
+		vTaskDelete(NULL);
+		//char* testname = xGetCurrentTaskHandle();
+		//printf("tank handle")
+	//}
+	//printf("user task done \n");
+	//vTaskDelay(500);
 
-	}
 }
 
 
 /*-----------------------------------------------------------*/
 
-static void Deadline_Driven_Task_Generator( void *pvParameters )
+static void Generator_DD( void *pvParameters )
 {
 	uint32_t taskCount = 1;
 	while(1)
 	{
-		uint32_t now = (unsigned)time(NULL);
+		//uint32_t now = (unsigned)time(NULL);
 		//Prepare task specific information create an instance of a DD task
 		//by calling release_dd_task()
 
 		TaskHandle_t t_handle;
 
-		xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, &t_handle);
+		uint32_t task_id = taskCount;
+		taskCount ++;
+
+		xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, &task_id, 1, &t_handle);
 		//vTaskSuspend(t_handle);
 
 		task_type type = PERIODIC;
-
-		uint32_t task_id = taskCount;
-		taskCount ++;
 
 		uint32_t execution_time; // or 150 or 250
 		uint32_t absolute_deadline;
