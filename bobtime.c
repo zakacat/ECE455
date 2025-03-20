@@ -233,6 +233,8 @@ static void get_overdue_dd_task_list();
 
 /*-----------------------------------------------------------*/
 
+TaskHandle_t scheduler_handle;
+
 int main(void)
 {
 	/* Initialize LEDs */
@@ -275,17 +277,17 @@ int main(void)
 
 	vQueueAddToRegistry( xQueue_handle5, "Monitor overdue task" );
 
-
-	xQueueSet = xQueueCreateSet( 5 * 5 );
+	xQueueSet = xQueueCreateSet( 5 * 2 );
 
 	xQueueAddToSet( xQueue_handle1, xQueueSet );
 	xQueueAddToSet( xQueue_handle2, xQueueSet );
-	xQueueAddToSet( xQueue_handle3, xQueueSet );
-	xQueueAddToSet( xQueue_handle4, xQueueSet );
-	xQueueAddToSet( xQueue_handle5, xQueueSet );
+	//xQueueAddToSet( xQueue_handle3, xQueueSet );
+	//xQueueAddToSet( xQueue_handle4, xQueueSet );
+	//xQueueAddToSet( xQueue_handle5, xQueueSet );
+
 
 	//All these priorities are currently the same
-	xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 4, NULL);
+	scheduler_handle = xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 4, NULL);
 	//xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 	xTaskCreate( Generator_DD, "Generator_DD", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
 	//xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
@@ -318,8 +320,8 @@ static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t
 	newTask->type = type;
 	newTask->task_id = task_id;
 	newTask->absolute_deadline = absolute_deadline;
-	newTask->execution_time = execution_time;
-	printf("Task Sent to DDS!: %u ON!\n", (int)task_id);
+	//newTask->execution_time = execution_time;
+//	printf("Task Sent to DDS!: %u ON!\n", (int)task_id);
 
 	if( xQueueSend(xQueue_handle1, &newTask, 100)) // Try to put the task into the queue
 	{
@@ -327,6 +329,7 @@ static void release_dd_task_func(TaskHandle_t t_handle, task_type type, uint32_t
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
 	}
 
+	//vTaskResume(scheduler_handle);
 
 	//This one creates the_dd_task and then adds it to the activeList
 }
@@ -400,59 +403,71 @@ static void Scheduler_DD( void *pvParameters )
 	dd_task* activeTail;
 	uint32_t count;
 
+	xQueueHandle dummyqueue;
 
-	xQueueHandle xQueueThatContainsData;
 	while(1)
 	{
-		xQueueThatContainsData = ( QueueHandle_t ) xQueueSelectFromSet(xQueueSet, portMAX_DELAY );
 		printf("INSIDE DDS \n ");
 		//if there is a new task waiting to be added to the active task list
-		if(xQueueReceive(xQueue_handle1, &newTask, 0))
-		{
 
-			printf("DDS Q1 read add task to active list %u \n", (int)newTask->task_id);
-//			if(activeTail == NULL){
-//				activeTail = newTask;
-//				activeHead = newTask;
-//			}
-//			else{
-//				activeTail->next_task = newTask;
-//			}
-//			//activeTail->task = newTask;
-//			//activeTail = activeTail->next_task;
-//
-//			//include logic for rearranging the list
-//			//check for earliest deadline
-//			//start the first task using the handle
-//
-//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
+
+		dummyqueue = ( QueueHandle_t ) xQueueSelectFromSet (xQueueSet, portMAX_DELAY );
+
+		if (dummyqueue == xQueue_handle1)
+		{
+			if(xQueueReceive(xQueue_handle1, &newTask, 0))
+			{
+
+				printf("DDS Q1 read add task to active list %u \n", (int)newTask->task_id);
+	//			if(activeTail == NULL){
+	//				activeTail = newTask;
+	//				activeHead = newTask;
+	//			}
+	//			else{
+	//				activeTail->next_task = newTask;
+	//			}
+	//			//activeTail->task = newTask;
+	//			//activeTail = activeTail->next_task;
+	//
+	//			//include logic for rearranging the list
+	//			//check for earliest deadline
+	//			//start the first task using the handle
+	//
+	//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
+			}
 		}
 
 		uint32_t task_id;
+		TaskHandle_t task_handle;
 		//if a task is completed, will be removed from active list and sent to completed
-		if(xQueueReceive(xQueue_handle2, &task_id, 0))
-		{
 
-			printf("DDS Q2 add task to complete list %u \n", task_id);
-//			if(activeTail == NULL){
-//				activeTail = newTask;
-//				activeHead = newTask;
-//			}
-//			else{
-//				activeTail->next_task = newTask;
-//			}
-//			//activeTail->task = newTask;
-//			//activeTail = activeTail->next_task;
-//
-//			//include logic for rearranging the list
-//			//check for earliest deadline
-//			//start the first task using the handle
-//
-//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
-//			printf("delete task next \n");
-//			vTaskDelete( task_id);
-//			printf("task deleted \n");
-			//xQueueReset(xQueue_handle2);
+		if (dummyqueue == xQueue_handle2)
+		{
+			if(xQueueReceive(xQueue_handle2, &task_id, 0))
+			{
+
+				printf("DDS Q2 add task to complete list %u \n", (int)task_id);
+	//			if(activeTail == NULL){
+	//				activeTail = newTask;
+	//				activeHead = newTask;
+	//			}
+	//			else{
+	//				activeTail->next_task = newTask;
+	//			}
+	//			//activeTail->task = newTask;
+	//			//activeTail = activeTail->next_task;
+	//
+	//			//include logic for rearranging the list
+	//			//check for earliest deadline
+	//			//start the first task using the handle
+	//
+	//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
+	//			printf("delete task next \n");
+	//			vTaskDelete( task_id);
+	//			printf("task deleted \n");
+				//xQueueReset(xQueue_handle2);
+				//vTaskDelete(task_id);
+			}
 		}
 
 
@@ -526,10 +541,13 @@ static void Scheduler_DD( void *pvParameters )
 		printf("Scheduler_DD DONE !\n");
 
 
-		vTaskDelay(100); //Pass off the CPU to any task that needs it
+		//vTaskDelay(100); //Pass off the CPU to any task that needs it
+		//vTaskSuspend(NULL);
 
 	}
 }
+
+
 
 /*-----------------------------------------------------------*/
 
@@ -552,15 +570,16 @@ static void User_Defined_Task( void *pvParameters )
 
 		printf("User_Defined_Tasks !\n");
 
-		//complete_dd_task_func( pvParameters);
+		complete_dd_task_func( pvParameters);
 		printf("called complete(), now back in USER DEFINED TASK\n");
 		//vTaskDelay(1);
-		vTaskDelete(NULL);
+		//vTaskDelete(NULL);
 		//char* testname = xGetCurrentTaskHandle();
 		//printf("tank handle")
 	//}
-	//printf("user task done \n");
-	//vTaskDelay(500);
+	printf("user task done \n");
+	//vTaskDelete(NULL);
+	vTaskDelay(1000);
 	//	return 0;
 
 }
@@ -611,7 +630,7 @@ static void Generator_DD( TimerHandle_t xTimer )
 		release_dd_task_func(t_handle, type, task_id, execution_time, absolute_deadline);
 
 
-		//vTaskDelay(500);
+		vTaskDelay(500);
 
 	}
 }
