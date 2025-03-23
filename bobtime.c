@@ -136,6 +136,7 @@ functionality.
 
 /* Standard includes. */
 #include <stdint.h>
+//#include <queue.h>
 #include <stdio.h>
 #include "stm32f4_discovery.h"
 #include <stdlib.h> //Added for random function
@@ -163,7 +164,9 @@ functionality.
 #define red_led		LED5
 #define blue_led	LED6
 
-#define TIMER_PERIOD_MS    pdMS_TO_TICKS(1000) // 1-second timer period
+#define TIMER_PERIOD_MS_1    pdMS_TO_TICKS(500) // .5-second timer period
+#define TIMER_PERIOD_MS_2    pdMS_TO_TICKS(500) // .5-second timer period
+#define TIMER_PERIOD_MS_3    pdMS_TO_TICKS(750) // .75-second timer period
 #define TASK_STACK_SIZE    256
 #define TASK_PRIORITY      tskIDLE_PRIORITY + 1
 
@@ -176,7 +179,10 @@ static void prvSetupHardware( void );
 
 static void Scheduler_DD( void *pvParameters );
 static void User_Defined_Task( void *pvParameters );
-static void Generator_DD( void *pvParameters );
+static void Generator_DD_1( void *pvParameters );
+static void Generator_DD_1_Callback( );
+static void Generator_DD_2( void *pvParameters );
+static void Generator_DD_3( void *pvParameters );
 static void Monitor_Task( void *pvParameters );
 
 
@@ -234,6 +240,9 @@ static void get_overdue_dd_task_list();
 /*-----------------------------------------------------------*/
 
 TaskHandle_t scheduler_handle;
+TaskHandle_t t_handle_1;
+TaskHandle_t t_handle_2;
+TaskHandle_t t_handle_3;
 
 int main(void)
 {
@@ -289,25 +298,58 @@ int main(void)
 	//All these priorities are currently the same
 	scheduler_handle = xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 4, NULL);
 	//xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-	xTaskCreate( Generator_DD, "Generator_DD", configMINIMAL_STACK_SIZE, NULL, 3, NULL);
+	xTaskCreate( Generator_DD_1, "Generator_DD_1", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_1);
+	//xTaskCreate( Generator_DD_2, "Generator_DD_2", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_2);
+	//xTaskCreate( Generator_DD_3, "Generator_DD_3", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_3);
 	//xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
-	TimerHandle_t xTaskCreationTimer;
-	xTaskCreationTimer = xTimerCreate("TaskTimer", TIMER_PERIOD_MS, pdTRUE, NULL, Generator_DD);
+	TimerHandle_t xTaskCreationTimer_1;
+	xTaskCreationTimer_1 = xTimerCreate("TaskTimer", TIMER_PERIOD_MS_1, pdTRUE, NULL, Generator_DD_1_Callback);
 
-	if (xTaskCreationTimer != NULL && xTimerStart(xTaskCreationTimer, 0) == pdPASS)
-	    {
-	        printf("Timer started successfully.\n");
-	    }
-	    else
-	    {
-	        printf("Timer creation or start failed!\n");
-	    }
+	if (xTaskCreationTimer_1 != NULL && xTimerStart(xTaskCreationTimer_1, 0) == pdPASS)
+	{
+		printf("Timer started successfully.\n");
+	}
+	else
+	{
+		printf("Timer creation or start failed!\n");
+	}
+
+//	TimerHandle_t xTaskCreationTimer_2;
+//	xTaskCreationTimer_2 = xTimerCreate("TaskTimer", TIMER_PERIOD_MS_2, pdTRUE, NULL, Generator_DD_2_Callback);
+//
+//	if (xTaskCreationTimer_2 != NULL && xTimerStart(xTaskCreationTimer_2, 0) == pdPASS)
+//	{
+//		printf("Timer started successfully.\n");
+//	}
+//	else
+//	{
+//		printf("Timer creation or start failed!\n");
+//	}
+//
+//	TimerHandle_t xTaskCreationTimer_3;
+//	xTaskCreationTimer_3 = xTimerCreate("TaskTimer", TIMER_PERIOD_MS_3, pdTRUE, NULL, Generator_DD_3_Callback);
+//
+//	if (xTaskCreationTimer_3 != NULL && xTimerStart(xTaskCreationTimer_3, 0) == pdPASS)
+//	{
+//		printf("Timer started successfully.\n");
+//	}
+//	else
+//	{
+//		printf("Timer creation or start failed!\n");
+//	}
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
 	return 0;
 }
+
+static void Generator_DD_1_Callback(TimerHandle_t xTimer){
+	printf("Callback 1 successfully called.\n");
+	vTaskResume(t_handle_1);
+}
+
+
 
 //This function receives all of the information necessary to create a
 //new dd_taskstruct(excluding the release time and completion time.
@@ -556,8 +598,8 @@ static void User_Defined_Task( void *pvParameters )
 
 
 
-	//while(1)
-	//{
+	while(1)
+	{
 		//A User-Defined Task would normally perform something useful such as a calculation;
 		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
 		//It is recommended to make use of the LEDs on the discovery board during development in order to provide
@@ -569,17 +611,17 @@ static void User_Defined_Task( void *pvParameters )
 
 
 		printf("User_Defined_Tasks !\n");
-
+		vTaskDelay(95);
 		complete_dd_task_func( pvParameters);
 		printf("called complete(), now back in USER DEFINED TASK\n");
-		//vTaskDelay(1);
-		//vTaskDelete(NULL);
+		//vTaskSuspend(NULL);
+		vTaskDelete(NULL);
 		//char* testname = xGetCurrentTaskHandle();
 		//printf("tank handle")
-	//}
-	printf("user task done \n");
+	}
+	//printf("user task done \n");
 	//vTaskDelete(NULL);
-	vTaskDelay(1000);
+
 	//	return 0;
 
 }
@@ -587,11 +629,12 @@ static void User_Defined_Task( void *pvParameters )
 
 /*-----------------------------------------------------------*/
 
-static void Generator_DD( TimerHandle_t xTimer )
+static void Generator_DD_1( void *pvParameters)
 {
 	uint32_t taskCount = 1;
 	while(1)
 	{
+		vTaskSuspend(NULL);
 		//uint32_t now = (unsigned)time(NULL);
 		//Prepare task specific information create an instance of a DD task
 		//by calling release_dd_task()
@@ -610,30 +653,103 @@ static void Generator_DD( TimerHandle_t xTimer )
 		uint32_t absolute_deadline;
 		uint32_t now = 0;
 
-		//task 1
-		if(taskCount % 1 == 0){
 
-			execution_time = 95; // or 150 or 250
-			absolute_deadline = now + 500; //Deadline is the now plus period
-		}
-		else if (taskCount % 2 == 0){ //task 2
-			execution_time = 150; // or 150 or 250
-			absolute_deadline = now + 500; //Deadline is the now plus period
-		}
-		else { //task 3
-			execution_time = 250; // or 150 or 250
-			absolute_deadline = now + 750; //Deadline is the now plus period
-		}
+		execution_time = 95; // or 150 or 250
+		absolute_deadline = now + 500; //Deadline is the now plus period
+
 
 		printf("DD task created %u !\n", task_id);
 
 		release_dd_task_func(t_handle, type, task_id, execution_time, absolute_deadline);
 
 
-		vTaskDelay(500);
+		//vTaskDelay(500);
 
 	}
 }
+
+/*-----------------------------------------------------------*/
+
+static void Generator_DD_2( void *pvParameters )
+{
+	uint32_t taskCount = 1;
+	while(1)
+	{
+		vTaskSuspend(NULL);
+		//uint32_t now = (unsigned)time(NULL);
+		//Prepare task specific information create an instance of a DD task
+		//by calling release_dd_task()
+
+		TaskHandle_t t_handle;
+
+		uint32_t task_id = taskCount;
+		taskCount ++;
+
+		xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, &task_id, 1, &t_handle);
+		//vTaskSuspend(t_handle);
+
+		task_type type = PERIODIC;
+
+		uint32_t execution_time; // or 150 or 250
+		uint32_t absolute_deadline;
+		uint32_t now = 0;
+
+
+		execution_time = 95; // or 150 or 250
+		absolute_deadline = now + 500; //Deadline is the now plus period
+
+
+		printf("DD task created %u !\n", task_id);
+
+		release_dd_task_func(t_handle, type, task_id, execution_time, absolute_deadline);
+
+
+		//vTaskDelay(500);
+
+	}
+}
+
+/*-----------------------------------------------------------*/
+
+static void Generator_DD_3( void *pvParameters )
+{
+	uint32_t taskCount = 1;
+//	while(1)
+//	{
+		vTaskSuspend(NULL);
+		//uint32_t now = (unsigned)time(NULL);
+		//Prepare task specific information create an instance of a DD task
+		//by calling release_dd_task()
+
+		TaskHandle_t t_handle;
+
+		uint32_t task_id = taskCount;
+		taskCount ++;
+
+		xTaskCreate( User_Defined_Task, "User_Defined_Task", configMINIMAL_STACK_SIZE, &task_id, 1, &t_handle);
+		//vTaskSuspend(t_handle);
+
+		task_type type = PERIODIC;
+
+		uint32_t execution_time; // or 150 or 250
+		uint32_t absolute_deadline;
+		uint32_t now = 0;
+
+
+		execution_time = 95; // or 150 or 250
+		absolute_deadline = now + 500; //Deadline is the now plus period
+
+
+		printf("DD task created %u !\n", task_id);
+
+		release_dd_task_func(t_handle, type, task_id, execution_time, absolute_deadline);
+
+
+		//vTaskDelay(500);
+
+	//}
+}
+
 
 /*-----------------------------------------------------------*/
 
@@ -724,4 +840,3 @@ static void prvSetupHardware( void )
 	/* TODO: Setup the clocks, etc. here, if they were not configured before
 	main() was called. */
 }
-
