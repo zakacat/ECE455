@@ -459,13 +459,15 @@ static void Scheduler_DD( void *pvParameters )
 	dd_task_node* completeTail = malloc(sizeof(dd_task_node));
 	dd_task_node* completeCurr = malloc(sizeof(dd_task_node));
 
-	dd_task_node* overdueHead = malloc(sizeof(dd_task_node));
-	dd_task_node* overdueTail = malloc(sizeof(dd_task_node));
-	dd_task_node* overdueCurr = malloc(sizeof(dd_task_node));
+	//dd_task_node* overdueHead = malloc(sizeof(dd_task_node));
+	//dd_task_node* overdueTail = malloc(sizeof(dd_task_node));
+	//dd_task_node* overdueCurr = malloc(sizeof(dd_task_node));
 
 
 
-	uint32_t count;
+	uint32_t activeCount = 0;
+	uint32_t completeCount = 0;
+	uint32_t overdueCount = 0;
 
 	dd_task* dumbTask = malloc(sizeof(dd_task));
 	dumbTask->task_id = 0;
@@ -514,7 +516,7 @@ static void Scheduler_DD( void *pvParameters )
 //
 //				printf("ABSOLUTE DEADLINE !!!!!!! %u \n", (int)newTask->absolute_deadline);
 
-				if(activeHead->task->task_id == 0){
+				if(activeCount == 0){
 
 					printf("FIRST NODE FOUND!!!!!!!");
 
@@ -544,6 +546,8 @@ static void Scheduler_DD( void *pvParameters )
 				printf("CURRENT TAIL NODE TASK ID !!!!!!! %u \n", (int)activeTail->task->task_id);
 				printf("CURRENT HEAD NODE TASK ID !!!!!!! %u \n", (int)activeHead->task->task_id);
 
+				activeCount++ ;
+
 				//activeTail->task = newTask;
 				//activeTail = activeTail->next_task;
 
@@ -559,7 +563,7 @@ static void Scheduler_DD( void *pvParameters )
 		TaskHandle_t task_handle;
 		//if a task is completed, will be removed from active list and sent to completed
 
-		if (dummyqueue == xQueue_handle2)
+		if (dummyqueue == xQueue_handle2) //DATA PRESENT AT Q2
 		{
 			if(xQueueReceive(xQueue_handle2, &task_id, 0))
 			{
@@ -577,7 +581,49 @@ static void Scheduler_DD( void *pvParameters )
 
 				printf("LOOKING FOR %d  FOUND %d  \n", (int)task_id, (int)activeCurr->task->task_id );
 
-				//activeCurr->prev_task_node->next_task_node = activeCurr->next_task_node;
+				// IF THE COMPLETED TASK IS THE ONLY TASK IN THE ACTIVE LIST
+				if (activeCount == 1)
+				{
+					activeHead->task = dumbTask;
+				}
+
+			//	activeCurr->prev_task_node->next_task_node = activeCurr->next_task_node;
+
+
+				if (completeCount == 0) // IF THE COMPLETED TASK IS THE FIRST COMPLETED TASK
+				{
+					completeHead = activeCurr;
+					completeTail = activeCurr;
+
+					completeHead->prev_task_node = NULL;
+					completeHead->next_task_node = NULL;
+
+					completeTail->prev_task_node = NULL;
+					completeTail->next_task_node = NULL;
+				}
+
+				if (completeCount == 1 )
+				{
+					completeHead->next_task_node = activeCurr;
+					completeTail = activeCurr;
+
+				}
+
+				if (completeCount >1 )
+				{
+					completeCurr = completeHead;
+
+					while( completeCurr != completeTail )
+					{
+						completeCurr = completeCurr->next_task_node;
+					}
+
+					completeCurr->next_task_node = activeCurr;
+					completeTail = completeCurr->next_task_node;
+					completeTail->next_task_node = NULL;
+				}
+
+
 	//
 	//			//include logic for rearranging the list
 	//			//check for earliest deadline
@@ -589,34 +635,36 @@ static void Scheduler_DD( void *pvParameters )
 	//			printf("task deleted \n");
 				//xQueueReset(xQueue_handle2);
 				//vTaskDelete(task_id);
+				activeCount--;
+				completeCount++;
 			}
 		}
 
 
 		//if the monitor task wants to know how many active tasks there are
-		if(xQueueReceive(xQueue_handle3, &count, 0))
+		if(xQueueReceive(xQueue_handle3, &activeCount, 0))
 		{
-			printf("DDS Q3 The amount of active tasks are %d \n", (int)count);
-			if(count == 1){
+			printf("DDS Q3 The amount of active tasks are %d \n", (int)activeCount);
+			if(activeCount == 1){
 
-				count = 0;
+				//count = 0;
 
-				dd_task_node* countList = activeHead;
+			//	dd_task_node* countList = activeHead;
 
 				//printf("DDS count list pointer %p \n", (void *) countList);
-				while(countList->next_task_node != NULL){
-					count ++;
-
-					countList = countList->next_task_node;
-				}
+				//while(countList->next_task_node != NULL){
+				//	count ++;
+//
+			//		countList = countList->next_task_node;
+			//	}
 
 			}
-			printf("The amount of active tasks are %u", count);
+			//printf("The amount of active tasks are %u", count);
 
 		}
 
 		//if the monitor task wants to know how many completed tasks there are
-		if(xQueueReceive(xQueue_handle4, &count, 0))
+		if(xQueueReceive(xQueue_handle4, &activeCount, 0))
 		{
 			printf("DDS Q4 The amount of completed tasks are");
 //			printf("The amount of completed tasks are %d \n", (int)count);
@@ -638,7 +686,7 @@ static void Scheduler_DD( void *pvParameters )
 
 		}
 
-		if(xQueueReceive(xQueue_handle5, &count, 0))
+		if(xQueueReceive(xQueue_handle5, &activeCount, 0))
 		{
 			printf("DDS Q5 The amount of overdue tasks are");
 //			printf("The amount of overdue tasks are %d \n", (int)count);
