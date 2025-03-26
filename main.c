@@ -471,7 +471,23 @@ static void Scheduler_DD( void *pvParameters )
 
 	dd_task* dumbTask = malloc(sizeof(dd_task));
 	dumbTask->task_id = 0;
+
 	activeHead->task = dumbTask;
+	activeHead->prev_task_node = NULL;
+	activeHead->next_task_node = activeTail;
+
+	activeTail->task = dumbTask;
+	activeTail->next_task_node = NULL;
+	activeTail->prev_task_node = activeHead;
+
+	completeHead->task = dumbTask;
+	completeHead->prev_task_node = NULL;
+	completeHead->next_task_node = completeTail;
+
+	completeTail->task = dumbTask;
+	completeTail->next_task_node = NULL;
+	completeTail->prev_task_node = completeHead;
+
 
 	TickType_t currentTime;
 
@@ -516,35 +532,42 @@ static void Scheduler_DD( void *pvParameters )
 //
 //				printf("ABSOLUTE DEADLINE !!!!!!! %u \n", (int)newTask->absolute_deadline);
 
-				if(activeCount == 0){
-
-					printf("FIRST NODE FOUND!!!!!!!");
-
-					activeTail->task = newTask;
-
-					activeHead->task = newTask;
-
-					activeHead->next_task_node = activeTail;
-
-					activeTail->prev_task_node = activeHead;
-				}
-				else{
+//				if(activeCount == 0){
+//
+//					printf("FIRST NODE FOUND!!!!!!!");
+//
+//					activeTail->task = newTask;
+//
+//					activeHead->task = newTask;
+//
+//					activeHead->next_task_node = activeTail;
+//
+//					activeTail->prev_task_node = activeHead;
+//				}
+				//else{
 					dd_task_node* newNode = malloc(sizeof(dd_task_node));
 
 					newNode->task = newTask;
 
-					newNode->prev_task_node = activeTail;
+					activeTail->prev_task_node->next_task_node = newNode;
 
-					activeTail->next_task_node = newNode;
+					newNode->prev_task_node = activeTail->prev_task_node;
 
-					activeTail = activeTail->next_task_node;
+					newNode->next_task_node = activeTail;
 
-					activeTail->next_task_node = NULL;
+					activeTail->prev_task_node = newNode;
 
-				}
+//					activeTail->next_task_node = newNode;
 
-				printf("CURRENT TAIL NODE TASK ID !!!!!!! %u \n", (int)activeTail->task->task_id);
-				printf("CURRENT HEAD NODE TASK ID !!!!!!! %u \n", (int)activeHead->task->task_id);
+					//activeTail = newNode;
+
+					//activeTail->next_task_node = NULL;
+
+				//}
+
+
+				printf("CURRENT HEAD NODE TASK ID !!!!!!! %u \n", (int)activeHead->next_task_node->task->task_id);
+				printf("CURRENT TAIL NODE TASK ID !!!!!!! %u \n", (int)activeTail->prev_task_node->task->task_id);
 
 				activeCount++ ;
 
@@ -576,52 +599,48 @@ static void Scheduler_DD( void *pvParameters )
 
 				while (activeCurr->task->task_id != task_id)
 				{
+					printf("Inside while loop  %u \n", (int)activeCurr->task->task_id);
 					activeCurr = activeCurr->next_task_node;
 				}
 
 				printf("LOOKING FOR %d  FOUND %d  \n", (int)task_id, (int)activeCurr->task->task_id );
 
 				// IF THE COMPLETED TASK IS THE ONLY TASK IN THE ACTIVE LIST
-				if (activeCount == 1)
-				{
-					activeHead->task = dumbTask;
-				}
+//				if (activeCount == 1)
+//				{
+//					activeHead->task = dumbTask;
+//				}
 
 			//	activeCurr->prev_task_node->next_task_node = activeCurr->next_task_node;
 
 
-				if (completeCount == 0) // IF THE COMPLETED TASK IS THE FIRST COMPLETED TASK
-				{
-					completeHead = activeCurr;
-					completeTail = activeCurr;
+//				if (completeCount == 0) // IF THE COMPLETED TASK IS THE FIRST COMPLETED TASK
+//				{
+					//completeHead = activeCurr;
+					//completeTail = activeCurr;
 
-					completeHead->prev_task_node = NULL;
-					completeHead->next_task_node = NULL;
+					//completeHead->prev_task_node = NULL;
+					//completeHead->next_task_node = NULL;
 
-					completeTail->prev_task_node = NULL;
-					completeTail->next_task_node = NULL;
-				}
+					//completeTail->prev_task_node = NULL;
+					//completeTail->next_task_node = NULL;
+//				}
 
-				if (completeCount == 1 )
-				{
-					completeHead->next_task_node = activeCurr;
-					completeTail = activeCurr;
+				//activeCurr->task = newTask;
 
-				}
+				activeCurr->prev_task_node->next_task_node = activeCurr->next_task_node;
 
-				if (completeCount >1 )
-				{
-					completeCurr = completeHead;
+				activeCurr->next_task_node->prev_task_node = activeCurr->prev_task_node;
 
-					while( completeCurr != completeTail )
-					{
-						completeCurr = completeCurr->next_task_node;
-					}
+				//newNode->next_task_node = activeTail;
 
-					completeCurr->next_task_node = activeCurr;
-					completeTail = completeCurr->next_task_node;
-					completeTail->next_task_node = NULL;
-				}
+				//activeTail->prev_task_node = newNode;
+
+				activeCurr->prev_task_node = completeTail->prev_task_node;
+
+				activeCurr->next_task_node = completeTail;
+
+				completeTail->prev_task_node = activeCurr;
 
 
 	//
@@ -708,6 +727,14 @@ static void Scheduler_DD( void *pvParameters )
 
 		}
 
+		activeCurr = activeHead;
+
+		while (activeCurr->task->task_id != task_id)
+		{
+			printf("Inside while loop  %u \n", (int)activeCurr->task->task_id);
+			activeCurr = activeCurr->next_task_node;
+		}
+
 		printf("Scheduler_DD DONE !\n");
 
 
@@ -724,9 +751,16 @@ static void Scheduler_DD( void *pvParameters )
 static void User_Defined_Task_1( void *pvParameters )
 {
 
+	printf("User_Defined_Tasks !\n");
+	TickType_t startTime;
 
+	startTime = xTaskGetTickCount();
 
-	while(1)
+	TickType_t endTime;
+
+	endTime = startTime + (pdMS_TO_TICKS(95));
+
+	while(xTaskGetTickCount()<endTime)
 	{
 		//A User-Defined Task would normally perform something useful such as a calculation;
 		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
@@ -737,16 +771,18 @@ static void User_Defined_Task_1( void *pvParameters )
 
 		//STM_EVAL_LEDOff(amber_led);
 
+		//printf("!!!!!!!!!!!!!!!!!!!!!\n");
 
-		printf("User_Defined_Tasks !\n");
-		vTaskDelay(95);
-		complete_dd_task_func( pvParameters);
-		printf("called complete(), now back in USER DEFINED TASK\n");
-		//vTaskSuspend(NULL);
-		vTaskDelete(NULL);
 		//char* testname = xGetCurrentTaskHandle();
 		//printf("tank handle")
 	}
+
+	//printf("User_Defined_Tasks !\n");
+	//vTaskDelay(95);
+	complete_dd_task_func( pvParameters);
+	printf("called complete(), now back in USER DEFINED TASK\n");
+	//vTaskSuspend(NULL);
+	vTaskDelete(NULL);
 	//printf("user task done \n");
 	//vTaskDelete(NULL);
 
@@ -760,7 +796,16 @@ static void User_Defined_Task_2( void *pvParameters )
 
 
 
-	while(1)
+	printf("User_Defined_Tasks !\n");
+	TickType_t startTime;
+
+	startTime = xTaskGetTickCount();
+
+	TickType_t endTime;
+
+	endTime = startTime + (pdMS_TO_TICKS(150));
+
+	while(xTaskGetTickCount()<endTime)
 	{
 		//A User-Defined Task would normally perform something useful such as a calculation;
 		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
@@ -772,15 +817,17 @@ static void User_Defined_Task_2( void *pvParameters )
 		//STM_EVAL_LEDOff(amber_led);
 
 
-		printf("User_Defined_Tasks !\n");
-		vTaskDelay(150);
-		complete_dd_task_func( pvParameters);
-		printf("called complete(), now back in USER DEFINED TASK\n");
-		//vTaskSuspend(NULL);
-		vTaskDelete(NULL);
+
 		//char* testname = xGetCurrentTaskHandle();
 		//printf("tank handle")
 	}
+
+	//printf("User_Defined_Tasks !\n");
+	//vTaskDelay(95);
+	complete_dd_task_func( pvParameters);
+	printf("called complete(), now back in USER DEFINED TASK\n");
+	//vTaskSuspend(NULL);
+	vTaskDelete(NULL);
 	//printf("user task done \n");
 	//vTaskDelete(NULL);
 
@@ -793,8 +840,16 @@ static void User_Defined_Task_3( void *pvParameters )
 {
 
 
+	printf("User_Defined_Tasks !\n");
+	TickType_t startTime;
 
-	while(1)
+	startTime = xTaskGetTickCount();
+
+	TickType_t endTime;
+
+	endTime = startTime + (pdMS_TO_TICKS(250));
+
+	while(xTaskGetTickCount()<endTime)
 	{
 		//A User-Defined Task would normally perform something useful such as a calculation;
 		//for this project, however, it may simply execute an empty loop for the duration of its execution time.
@@ -806,15 +861,17 @@ static void User_Defined_Task_3( void *pvParameters )
 		//STM_EVAL_LEDOff(amber_led);
 
 
-		printf("User_Defined_Tasks !\n");
-		vTaskDelay(250);
-		complete_dd_task_func( pvParameters);
-		printf("called complete(), now back in USER DEFINED TASK\n");
-		//vTaskSuspend(NULL);
-		vTaskDelete(NULL);
+
 		//char* testname = xGetCurrentTaskHandle();
 		//printf("tank handle")
 	}
+
+	//printf("User_Defined_Tasks !\n");
+	//vTaskDelay(95);
+	complete_dd_task_func( pvParameters);
+	printf("called complete(), now back in USER DEFINED TASK\n");
+	//vTaskSuspend(NULL);
+	vTaskDelete(NULL);
 	//printf("user task done \n");
 	//vTaskDelete(NULL);
 
