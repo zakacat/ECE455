@@ -164,11 +164,26 @@ functionality.
 #define red_led		LED5
 #define blue_led	LED6
 
-#define TIMER_PERIOD_MS_1    pdMS_TO_TICKS(500) // .5-second timer period
-#define TIMER_PERIOD_MS_2    pdMS_TO_TICKS(500) // .5-second timer period
-#define TIMER_PERIOD_MS_3    pdMS_TO_TICKS(750) // .75-second timer period
+
 #define TASK_STACK_SIZE    256
 #define TASK_PRIORITY      tskIDLE_PRIORITY + 1
+
+#define TASK_1_PERIOD			500
+#define TASK_1_EXECUTION_TIME 	95
+
+#define TASK_2_PERIOD			500
+#define TASK_2_EXECUTION_TIME	150
+
+#define TASK_3_PERIOD			750
+#define TASK_3_EXECUTION_TIME	250
+
+#define TASK_HYPERPERIOD		1500
+
+#define TIMER_PERIOD_MS_1    pdMS_TO_TICKS(TASK_1_PERIOD) // .5-second timer period
+#define TIMER_PERIOD_MS_2    pdMS_TO_TICKS(TASK_2_PERIOD) // .5-second timer period
+#define TIMER_PERIOD_MS_3    pdMS_TO_TICKS(TASK_3_PERIOD) // .75-second timer period
+#define TIMER_PERIOD_MS_4    pdMS_TO_TICKS(TASK_HYPERPERIOD) // .75-second timer period
+
 
 /*
  * TODO: Implement this function for any hardware specific clock configuration
@@ -188,13 +203,13 @@ static void Generator_DD_2_Callback( );
 static void Generator_DD_3( void *pvParameters );
 static void Generator_DD_3_Callback( );
 static void Monitor_Task( void *pvParameters );
-
+static void Monitor_Callback( );
 
 xQueueHandle xQueue_handle1 = 0; //The queue for sending new tasks
 xQueueHandle xQueue_handle2 = 0; //The queue for completing tasks
-xQueueHandle xQueue_handle3 = 0; //The queue for monitoring active tasks
-xQueueHandle xQueue_handle4 = 0; //The queue for monitoring completed tasks
-xQueueHandle xQueue_handle5 = 0; //The queue for monitoring overdue tasks
+xQueueHandle xQueue_handle3 = 0; //The queue for pinging the DDS to print the list lengths
+//xQueueHandle xQueue_handle4 = 0; //The queue for monitoring completed tasks
+//xQueueHandle xQueue_handle5 = 0; //The queue for monitoring overdue tasks
 
 static QueueSetHandle_t xQueueSet = NULL;
 
@@ -232,15 +247,15 @@ static void complete_dd_task_func(uint32_t); //This is the same as delete
 
 //This function sends a message to a queue requesting the Active Task List from the DDS.
 //Once a response is received from the DDS, the function returns the list.
-static void get_active_dd_task_node();
+static void print_all_dd_task_list_lengths();
 
 //This function sends a message to a queue requesting the Completed Task List from the DDS.
 //Once a response is received from the DDS, the function returns the list
-static void get_completed_dd_task_node();
+//static void get_completed_dd_task_node();
 
 //This function sends a message to a queue requesting the Overdue Task List from the DDS.
 //Once a response is received from the DDS, the function returns the list.
-static void get_overdue_dd_task_node();
+//static void get_overdue_dd_task_node();
 
 /*-----------------------------------------------------------*/
 
@@ -248,10 +263,12 @@ TaskHandle_t scheduler_handle;
 TaskHandle_t t_handle_1;
 TaskHandle_t t_handle_2;
 TaskHandle_t t_handle_3;
+TaskHandle_t t_handle_4;
 
 int main(void)
 {
 	/* Initialize LEDs */
+
 	STM_EVAL_LEDInit(amber_led);
 	STM_EVAL_LEDInit(green_led);
 	STM_EVAL_LEDInit(red_led);
@@ -275,38 +292,38 @@ int main(void)
 
 	xQueue_handle3 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
 								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
-	xQueue_handle4 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
-	xQueue_handle5 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+//	xQueue_handle4 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+//									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+//	xQueue_handle5 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
+//									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
 	vQueueAddToRegistry( xQueue_handle1, "Generator tasks" );
 
 	vQueueAddToRegistry( xQueue_handle2, "Complete" );
 
-	vQueueAddToRegistry( xQueue_handle3, "Monitor active task" );
+	vQueueAddToRegistry( xQueue_handle3, "Monitor print all tasks." );
+//
+//	vQueueAddToRegistry( xQueue_handle4, "Monitor complete task" );
+//
+//	vQueueAddToRegistry( xQueue_handle5, "Monitor overdue task" );
 
-	vQueueAddToRegistry( xQueue_handle4, "Monitor complete task" );
-
-	vQueueAddToRegistry( xQueue_handle5, "Monitor overdue task" );
-
-	xQueueSet = xQueueCreateSet( 5 * 2 );
+	xQueueSet = xQueueCreateSet( 3 * 2 );
 
 	xQueueAddToSet( xQueue_handle1, xQueueSet );
 	xQueueAddToSet( xQueue_handle2, xQueueSet );
-	//xQueueAddToSet( xQueue_handle3, xQueueSet );
+	xQueueAddToSet( xQueue_handle3, xQueueSet );
 	//xQueueAddToSet( xQueue_handle4, xQueueSet );
 	//xQueueAddToSet( xQueue_handle5, xQueueSet );
 
 
 	//All these priorities are currently the same
-	scheduler_handle = xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 4, NULL);
+	scheduler_handle = xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 6, NULL);
 
-	xTaskCreate( Generator_DD_1, "Generator_DD_1", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_1);
-	xTaskCreate( Generator_DD_2, "Generator_DD_2", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_2);
-	xTaskCreate( Generator_DD_3, "Generator_DD_3", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_3);
-	//xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+	xTaskCreate( Generator_DD_1, "Generator_DD_1", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_1);
+	xTaskCreate( Generator_DD_2, "Generator_DD_2", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_2);
+	xTaskCreate( Generator_DD_3, "Generator_DD_3", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_3);
+	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_4);
 
 	TimerHandle_t xTaskCreationTimer_1;
 	xTaskCreationTimer_1 = xTimerCreate("TaskTimer_1", TIMER_PERIOD_MS_1, pdTRUE, NULL, Generator_DD_1_Callback);
@@ -343,6 +360,18 @@ int main(void)
 	{
 		printf("Timer creation or start failed!\n");
 	}
+
+	TimerHandle_t xTaskCreationTimer_4;
+	xTaskCreationTimer_4 = xTimerCreate("TaskTimer_4", TIMER_PERIOD_MS_4, pdTRUE, NULL, Monitor_Callback);
+
+	if (xTaskCreationTimer_4 != NULL && xTimerStart(xTaskCreationTimer_4, 0) == pdPASS)
+	{
+		printf("Timer started successfully.\n");
+	}
+	else
+	{
+		printf("Timer creation or start failed!\n");
+	}
 	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
 
@@ -350,18 +379,21 @@ int main(void)
 }
 
 static void Generator_DD_1_Callback(TimerHandle_t xTimer){
-	printf("Callback 1 successfully called.\n");
+	printf("Gen 1 successfully called.\n");
 	vTaskResume(t_handle_1);
 }
 static void Generator_DD_2_Callback(TimerHandle_t xTimer){
-	printf("Callback 2 successfully called.\n");
+	printf("Gen 2 successfully called.\n");
 	vTaskResume(t_handle_2);
 }
 static void Generator_DD_3_Callback(TimerHandle_t xTimer){
-	printf("Callback 3 successfully called.\n");
+	printf("Gen 3 successfully called.\n");
 	vTaskResume(t_handle_3);
 }
-
+static void Monitor_Callback(TimerHandle_t xTimer){
+	printf("Monitor successfully called.\n");
+	vTaskResume(t_handle_4);
+}
 
 
 //This function receives all of the information necessary to create a
@@ -399,7 +431,7 @@ static void complete_dd_task_func(uint32_t task_id){//This is the same as delete
 
 //This function sends a message to a queue requesting the Active Task List from the DDS.
 //Once a response is received from the DDS, the function returns the list.
-static void get_active_dd_task_node(){
+static void print_all_dd_task_list_lengths(){
 
 	uint32_t count = 1;
 
@@ -418,8 +450,6 @@ static void get_active_dd_task_node(){
 //	}
 
 //	return count;
-
-
 }
 
 //This function sends a message to a queue requesting the Completed Task List from the DDS.
@@ -457,11 +487,11 @@ static void Scheduler_DD( void *pvParameters )
 
 	dd_task_node* completeHead = malloc(sizeof(dd_task_node));
 	dd_task_node* completeTail = malloc(sizeof(dd_task_node));
-	dd_task_node* completeCurr = malloc(sizeof(dd_task_node));
+//	dd_task_node* completeCurr = malloc(sizeof(dd_task_node));
 
 	dd_task_node* overdueHead = malloc(sizeof(dd_task_node));
 	dd_task_node* overdueTail = malloc(sizeof(dd_task_node));
-	dd_task_node* overdueCurr = malloc(sizeof(dd_task_node));
+//	dd_task_node* overdueCurr = malloc(sizeof(dd_task_node));
 
 
 
@@ -508,6 +538,7 @@ static void Scheduler_DD( void *pvParameters )
 	while(1)
 	{
 		printf("INSIDE DDS \n ");
+		printf ("Heap size %u \n" , (unsigned int)xPortGetFreeHeapSize() );
 		//if there is a new task waiting to be added to the active task list
 
 
@@ -595,7 +626,7 @@ static void Scheduler_DD( void *pvParameters )
 
 		//-----------------
 		uint32_t task_id;
-		TaskHandle_t task_handle;
+		//TaskHandle_t task_handle;
 		//if a task is completed, will be removed from active list and sent to completed
 
 		if (dummyqueue == xQueue_handle2) //DATA PRESENT AT Q2
@@ -682,86 +713,80 @@ static void Scheduler_DD( void *pvParameters )
 						priorityTask = activeCurr->task;
 					}
 					//shortestDeadline = activeCurr->task->absolute_deadline;
-					printf("Inside while loop BOB IS LAME  %u \n", (int)activeCurr->task->task_id);
+					printf("Inside while loop %u \n", (int)activeCurr->task->task_id);
 					activeCurr = activeCurr->next_task_node;
 				}
 
-				vTaskPrioritySet(priorityTask->t_handle, 2);
+				vTaskPrioritySet(priorityTask->t_handle, 1);
 			}
 		}
 
+		uint32_t checkTasks = 0;
 
 		//if the monitor task wants to know how many active tasks there are
-		if(xQueueReceive(xQueue_handle3, &activeCount, 0))
+		if(xQueueReceive(xQueue_handle3, &checkTasks, 0))
 		{
-			printf("DDS Q3 The amount of active tasks are %d \n", (int)activeCount);
-			if(activeCount == 1){
+			printf("DDS Q3 \n" );
+			if(checkTasks == 1){
 
-				//count = 0;
-
-			//	dd_task_node* countList = activeHead;
-
-				//printf("DDS count list pointer %p \n", (void *) countList);
-				//while(countList->next_task_node != NULL){
-				//	count ++;
-//
-			//		countList = countList->next_task_node;
-			//	}
+				printf("The amount of active tasks are %d \n", (int)activeCount);
+				printf("The amount of completed tasks are %d \n", (int)completeCount);
+				printf("The amount of overdue tasks are %d \n", (int)overdueCount);
 
 			}
 			//printf("The amount of active tasks are %u", count);
 
 		}
 
-		//if the monitor task wants to know how many completed tasks there are
-		if(xQueueReceive(xQueue_handle4, &activeCount, 0))
-		{
-			printf("DDS Q4 The amount of completed tasks are");
-//			printf("The amount of completed tasks are %d \n", (int)count);
-//			if(count == 1){
+//		//if the monitor task wants to know how many completed tasks there are
+//		if(xQueueReceive(xQueue_handle4, &activeCount, 0))
+//		{
+//			printf("DDS Q4 The amount of completed tasks are");
+////			printf("The amount of completed tasks are %d \n", (int)count);
+////			if(count == 1){
+////
+////				count = 0;
+////
+////				dd_task* countList = activeHead;
+////
+////				//printf("DDS count list pointer %p \n", (void *) countList);
+////				while(countList->next_task != NULL){
+////					count ++;
+////
+////					countList = countList->next_task;
+////				}
+////
+////			}
+////			printf("The amount of active tasks are %u", count);
 //
-//				count = 0;
+//		}
 //
-//				dd_task* countList = activeHead;
+//		if(xQueueReceive(xQueue_handle5, &activeCount, 0))
+//		{
+//			printf("DDS Q5 The amount of overdue tasks are");
+////			printf("The amount of overdue tasks are %d \n", (int)count);
+////			if(count == 1){
+////
+////				count = 0;
+////
+////				dd_task* countList = activeHead;
+////
+////				//printf("DDS count list pointer %p \n", (void *) countList);
+////				while(countList->next_task != NULL){
+////					count ++;
+////
+////					countList = countList->next_task;
+////				}
+////
+////			}
+////			printf("The amount of active tasks are %u", count);
 //
-//				//printf("DDS count list pointer %p \n", (void *) countList);
-//				while(countList->next_task != NULL){
-//					count ++;
-//
-//					countList = countList->next_task;
-//				}
-//
-//			}
-//			printf("The amount of active tasks are %u", count);
+//		}
 
-		}
 
-		if(xQueueReceive(xQueue_handle5, &activeCount, 0))
-		{
-			printf("DDS Q5 The amount of overdue tasks are");
-//			printf("The amount of overdue tasks are %d \n", (int)count);
-//			if(count == 1){
-//
-//				count = 0;
-//
-//				dd_task* countList = activeHead;
-//
-//				//printf("DDS count list pointer %p \n", (void *) countList);
-//				while(countList->next_task != NULL){
-//					count ++;
-//
-//					countList = countList->next_task;
-//				}
-//
-//			}
-//			printf("The amount of active tasks are %u", count);
-
-		}
-
-
-		printf("ACTIVE COUNT %d \n", activeCount);
-		printf("COMPLETE COUNT %d \n", completeCount);
-		printf("OVERDUE COUNT %d \n", overdueCount);
+		//printf("ACTIVE COUNT %d \n", activeCount);
+		//printf("COMPLETE COUNT %d \n", completeCount);
+//		printf("OVERDUE COUNT %d \n", overdueCount);
 		printf("Scheduler_DD DONE !\n");
 
 
@@ -786,7 +811,7 @@ static void User_Defined_Task_1( void *pvParameters )
 
 	TickType_t endTime;
 
-	endTime = startTime + (pdMS_TO_TICKS(95));
+	endTime = startTime + (pdMS_TO_TICKS(TASK_1_EXECUTION_TIME));
 
 	while(xTaskGetTickCount()<endTime)
 	{
@@ -833,7 +858,7 @@ static void User_Defined_Task_2( void *pvParameters )
 
 	TickType_t endTime;
 
-	endTime = startTime + (pdMS_TO_TICKS(150));
+	endTime = startTime + (pdMS_TO_TICKS(TASK_2_EXECUTION_TIME));
 
 	while(xTaskGetTickCount()<endTime)
 	{
@@ -879,7 +904,7 @@ static void User_Defined_Task_3( void *pvParameters )
 
 	TickType_t endTime;
 
-	endTime = startTime + (pdMS_TO_TICKS(250));
+	endTime = startTime + (pdMS_TO_TICKS(TASK_3_EXECUTION_TIME));
 
 	while(xTaskGetTickCount()<endTime)
 	{
@@ -937,11 +962,11 @@ static void Generator_DD_1( void *pvParameters)
 
 		uint32_t execution_time; // or 150 or 250
 		uint32_t absolute_deadline;
-		uint32_t now = 0;
+		//uint32_t now = 0;
 
 
-		execution_time = 95; // or 150 or 250
-		absolute_deadline = 500; //Deadline is the now plus period
+		execution_time = TASK_1_EXECUTION_TIME; // or 150 or 250
+		absolute_deadline = TASK_1_PERIOD; //Deadline is the now plus period
 
 
 		printf("DD task created %u !\n", task_id);
@@ -978,11 +1003,10 @@ static void Generator_DD_2( void *pvParameters )
 
 		uint32_t execution_time; // or 150 or 250
 		uint32_t absolute_deadline;
-		uint32_t now = 0;
+		//uint32_t now = 0;
 
-
-		execution_time = 150; // or 150 or 250
-		absolute_deadline = 500; //Deadline is the now plus period
+		execution_time = TASK_2_EXECUTION_TIME; // or 150 or 250
+		absolute_deadline = TASK_2_PERIOD; //Deadline is the now plus period
 
 
 		printf("DD task created %u !\n", task_id);
@@ -1019,11 +1043,10 @@ static void Generator_DD_3( void *pvParameters )
 
 		uint32_t execution_time; // or 150 or 250
 		uint32_t absolute_deadline;
-		uint32_t now = 0;
+		//uint32_t now = 0;
 
-
-		execution_time = 250; // or 150 or 250
-		absolute_deadline = 750; //Deadline is the now plus period
+		execution_time = TASK_3_EXECUTION_TIME; // or 150 or 250
+		absolute_deadline = TASK_3_PERIOD; //Deadline is the now plus period
 
 
 		printf("DD task created %u !\n", task_id);
@@ -1041,12 +1064,10 @@ static void Generator_DD_3( void *pvParameters )
 
 static void Monitor_Task( void *pvParameters )
 {
-	uint32_t numberOfActiveTasks;
-	uint32_t numberOfCompletedTasks;
-	uint32_t numberOfOverdueTasks;
 
 	while(1)
 	{
+		vTaskSuspend(NULL);
 		//Collects information from the DDS using the get_active_dd_task_node,
 		//get_complete_dd_task_node, and get_overdue_dd_task_nodefunctions.
 
@@ -1056,11 +1077,12 @@ static void Monitor_Task( void *pvParameters )
 		//continue to collect information and report system information
 
 		//Would be nice to hook this up to the user button
-		get_active_dd_task_node();
-
-
 		printf("Monitor_Task!\n");
-		vTaskDelay(5000);
+		print_all_dd_task_list_lengths();
+
+
+		//printf("Monitor_Task!\n");
+		//vTaskDelay(5000);
 	}
 }
 
