@@ -182,7 +182,7 @@ functionality.
 #define TIMER_PERIOD_MS_1    pdMS_TO_TICKS(TASK_1_PERIOD) // .5-second timer period
 #define TIMER_PERIOD_MS_2    pdMS_TO_TICKS(TASK_2_PERIOD) // .5-second timer period
 #define TIMER_PERIOD_MS_3    pdMS_TO_TICKS(TASK_3_PERIOD) // .75-second timer period
-#define TIMER_PERIOD_MS_4    pdMS_TO_TICKS(TASK_HYPERPERIOD) // .75-second timer period
+#define TIMER_PERIOD_MS_4    pdMS_TO_TICKS(TASK_HYPERPERIOD) //
 
 
 /*
@@ -208,8 +208,6 @@ static void Monitor_Callback( );
 xQueueHandle xQueue_handle1 = 0; //The queue for sending new tasks
 xQueueHandle xQueue_handle2 = 0; //The queue for completing tasks
 xQueueHandle xQueue_handle3 = 0; //The queue for pinging the DDS to print the list lengths
-//xQueueHandle xQueue_handle4 = 0; //The queue for monitoring completed tasks
-//xQueueHandle xQueue_handle5 = 0; //The queue for monitoring overdue tasks
 
 static QueueSetHandle_t xQueueSet = NULL;
 
@@ -249,13 +247,6 @@ static void complete_dd_task_func(uint32_t); //This is the same as delete
 //Once a response is received from the DDS, the function returns the list.
 static void print_all_dd_task_list_lengths();
 
-//This function sends a message to a queue requesting the Completed Task List from the DDS.
-//Once a response is received from the DDS, the function returns the list
-//static void get_completed_dd_task_node();
-
-//This function sends a message to a queue requesting the Overdue Task List from the DDS.
-//Once a response is received from the DDS, the function returns the list.
-//static void get_overdue_dd_task_node();
 
 /*-----------------------------------------------------------*/
 
@@ -292,10 +283,7 @@ int main(void)
 
 	xQueue_handle3 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
 								sizeof( uint32_t ) );	/* The size of each item the queue holds. */
-//	xQueue_handle4 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-//									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
-//	xQueue_handle5 = xQueueCreate( 	mainQUEUE_LENGTH,		/* The number of items the queue can hold. */
-//									sizeof( uint32_t ) );	/* The size of each item the queue holds. */
+
 
 	/* Add to the registry, for the benefit of kernel aware debugging. */
 	vQueueAddToRegistry( xQueue_handle1, "Generator tasks" );
@@ -303,18 +291,13 @@ int main(void)
 	vQueueAddToRegistry( xQueue_handle2, "Complete" );
 
 	vQueueAddToRegistry( xQueue_handle3, "Monitor print all tasks." );
-//
-//	vQueueAddToRegistry( xQueue_handle4, "Monitor complete task" );
-//
-//	vQueueAddToRegistry( xQueue_handle5, "Monitor overdue task" );
 
-	xQueueSet = xQueueCreateSet( 3 * 2 );
+	xQueueSet = xQueueCreateSet( 3 * 3);
 
 	xQueueAddToSet( xQueue_handle1, xQueueSet );
 	xQueueAddToSet( xQueue_handle2, xQueueSet );
 	xQueueAddToSet( xQueue_handle3, xQueueSet );
-	//xQueueAddToSet( xQueue_handle4, xQueueSet );
-	//xQueueAddToSet( xQueue_handle5, xQueueSet );
+
 
 
 	//All these priorities are currently the same
@@ -323,7 +306,7 @@ int main(void)
 	xTaskCreate( Generator_DD_1, "Generator_DD_1", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_1);
 	xTaskCreate( Generator_DD_2, "Generator_DD_2", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_2);
 	xTaskCreate( Generator_DD_3, "Generator_DD_3", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_3);
-	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 3, &t_handle_4);
+	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_4);
 
 	TimerHandle_t xTaskCreationTimer_1;
 	xTaskCreationTimer_1 = xTimerCreate("TaskTimer_1", TIMER_PERIOD_MS_1, pdTRUE, NULL, Generator_DD_1_Callback);
@@ -363,7 +346,7 @@ int main(void)
 
 	TimerHandle_t xTaskCreationTimer_4;
 	xTaskCreationTimer_4 = xTimerCreate("TaskTimer_4", TIMER_PERIOD_MS_4, pdTRUE, NULL, Monitor_Callback);
-
+//
 	if (xTaskCreationTimer_4 != NULL && xTimerStart(xTaskCreationTimer_4, 0) == pdPASS)
 	{
 		printf("Timer started successfully.\n");
@@ -392,7 +375,7 @@ static void Generator_DD_3_Callback(TimerHandle_t xTimer){
 }
 static void Monitor_Callback(TimerHandle_t xTimer){
 	printf("Monitor successfully called.\n");
-	vTaskResume(t_handle_4);
+	//vTaskResume(t_handle_4);
 }
 
 
@@ -441,37 +424,9 @@ static void print_all_dd_task_list_lengths(){
 		//vTaskDelay(200);//Add a delay to allow other tasks to go
 	}
 
-	//wait for something else to be added to the queue
-//	vtaskdelay(100);
-//
-//	if(xQueueReceive(xQueue_handle3, &count, 100))
-//	{
-//		printf("Active List Length Recevied! \n");
-//	}
 
-//	return count;
 }
 
-//This function sends a message to a queue requesting the Completed Task List from the DDS.
-//Once a response is received from the DDS, the function returns the list
-//static dd_task_node get_completed_dd_task_node(){
-//
-//	dd_task_node completedList;
-//
-//	return completedList;
-//}
-
-//This function sends a message to a queue requesting the Overdue Task List from the DDS.
-//Once a response is received from the DDS, the function returns the list.
-//static dd_task_node get_overdue_dd_task_node(){
-//
-//	dd_task_node overdueList;
-//
-//	return overdueList;
-//}
-
-
-//Set up the GPIO pins for the LEDs
 
 
 /*-----------------------------------------------------------*/
@@ -686,18 +641,6 @@ static void Scheduler_DD( void *pvParameters )
 				}
 
 
-	//
-	//			//include logic for rearranging the list
-	//			//check for earliest deadline
-	//			//start the first task using the handle
-	//
-	//			printf("DDS add task to active list pointer %p \n", (void *) &activeList);
-	//			printf("delete task next \n");
-	//			vTaskDelete( task_id);
-	//			printf("task deleted \n");
-				//xQueueReset(xQueue_handle2);
-				//vTaskDelete(task_id);
-
 				activeCount--;
 
 				activeCurr = activeHead->next_task_node;
@@ -717,7 +660,7 @@ static void Scheduler_DD( void *pvParameters )
 					activeCurr = activeCurr->next_task_node;
 				}
 
-				vTaskPrioritySet(priorityTask->t_handle, 1);
+				vTaskPrioritySet(priorityTask->t_handle, 2);
 			}
 		}
 
@@ -734,55 +677,7 @@ static void Scheduler_DD( void *pvParameters )
 				printf("The amount of overdue tasks are %d \n", (int)overdueCount);
 
 			}
-			//printf("The amount of active tasks are %u", count);
-
 		}
-
-//		//if the monitor task wants to know how many completed tasks there are
-//		if(xQueueReceive(xQueue_handle4, &activeCount, 0))
-//		{
-//			printf("DDS Q4 The amount of completed tasks are");
-////			printf("The amount of completed tasks are %d \n", (int)count);
-////			if(count == 1){
-////
-////				count = 0;
-////
-////				dd_task* countList = activeHead;
-////
-////				//printf("DDS count list pointer %p \n", (void *) countList);
-////				while(countList->next_task != NULL){
-////					count ++;
-////
-////					countList = countList->next_task;
-////				}
-////
-////			}
-////			printf("The amount of active tasks are %u", count);
-//
-//		}
-//
-//		if(xQueueReceive(xQueue_handle5, &activeCount, 0))
-//		{
-//			printf("DDS Q5 The amount of overdue tasks are");
-////			printf("The amount of overdue tasks are %d \n", (int)count);
-////			if(count == 1){
-////
-////				count = 0;
-////
-////				dd_task* countList = activeHead;
-////
-////				//printf("DDS count list pointer %p \n", (void *) countList);
-////				while(countList->next_task != NULL){
-////					count ++;
-////
-////					countList = countList->next_task;
-////				}
-////
-////			}
-////			printf("The amount of active tasks are %u", count);
-//
-//		}
-
 
 		//printf("ACTIVE COUNT %d \n", activeCount);
 		//printf("COMPLETE COUNT %d \n", completeCount);
@@ -795,7 +690,6 @@ static void Scheduler_DD( void *pvParameters )
 
 	}
 }
-
 
 
 /*-----------------------------------------------------------*/
@@ -1077,8 +971,8 @@ static void Monitor_Task( void *pvParameters )
 		//continue to collect information and report system information
 
 		//Would be nice to hook this up to the user button
-		printf("Monitor_Task!\n");
-		print_all_dd_task_list_lengths();
+		//printf("Monitor_Task!\n");
+		//print_all_dd_task_list_lengths();
 
 
 		//printf("Monitor_Task!\n");
@@ -1099,6 +993,7 @@ void vApplicationMallocFailedHook( void )
 	internally by FreeRTOS API functions that create tasks, queues, software 
 	timers, and semaphores.  The size of the FreeRTOS heap is set by the
 	configTOTAL_HEAP_SIZE configuration constant in FreeRTOSConfig.h. */
+	printf("FUCK MEMORY ERROR NOOOO!!! \n");
 	for( ;; );
 }
 /*-----------------------------------------------------------*/
