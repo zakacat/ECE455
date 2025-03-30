@@ -304,9 +304,20 @@ int main(void)
 	scheduler_handle = xTaskCreate( Scheduler_DD, "Scheduler_DD", configMINIMAL_STACK_SIZE, NULL, 6, NULL);
 
 	xTaskCreate( Generator_DD_1, "Generator_DD_1", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_1);
+
+	printf ("Heap size %u \n" , (unsigned int)xPortGetFreeHeapSize() );
+
 	xTaskCreate( Generator_DD_2, "Generator_DD_2", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_2);
+
+	printf ("Heap size %u \n" , (unsigned int)xPortGetFreeHeapSize() );
+
 	xTaskCreate( Generator_DD_3, "Generator_DD_3", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_3);
+
+	printf ("Heap size %u \n" , (unsigned int)xPortGetFreeHeapSize() );
+
 	xTaskCreate( Monitor_Task, "Monitor_Task", configMINIMAL_STACK_SIZE, NULL, 4, &t_handle_4);
+
+	printf ("Heap size %u \n" , (unsigned int)xPortGetFreeHeapSize() );
 
 	TimerHandle_t xTaskCreationTimer_1;
 	xTaskCreationTimer_1 = xTimerCreate("TaskTimer_1", TIMER_PERIOD_MS_1, pdTRUE, NULL, Generator_DD_1_Callback);
@@ -355,9 +366,9 @@ int main(void)
 	{
 		printf("Timer creation or start failed!\n");
 	}
-	/* Start the tasks and timer running. */
+//	/* Start the tasks and timer running. */
 	vTaskStartScheduler();
-
+//
 	return 0;
 }
 
@@ -679,9 +690,9 @@ static void Scheduler_DD( void *pvParameters )
 			}
 		}
 
-		//printf("ACTIVE COUNT %d \n", activeCount);
-		//printf("COMPLETE COUNT %d \n", completeCount);
-//		printf("OVERDUE COUNT %d \n", overdueCount);
+		printf("ACTIVE COUNT %d \n", activeCount);
+		printf("COMPLETE COUNT %d \n", completeCount);
+		printf("OVERDUE COUNT %d \n", overdueCount);
 		printf("Scheduler_DD DONE !\n");
 
 
